@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Виртуальное окружение
+.venv/
+venv/
+
+# Секреты
+.env
+.env.*
+
+# PyCharm
+.idea/
+
+# Кэш
+.pytest_cache/

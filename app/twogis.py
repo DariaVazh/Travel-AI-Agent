@@ -1,10 +1,5 @@
 """2GIS API: геокодинг, поиск мест рядом, маршруты.
 
-Ключ берётся (по порядку):
-  1) из переменной окружения TWOGIS_API_KEY;
-  2) из файла .env рядом с этим файлом, строка:  TWOGIS_API_KEY=ваш_ключ
-Файл .env НЕ коммитьте в git (добавьте его в .gitignore).
-
 Устойчивость к сбоям сети: одна сессия (keep-alive), повторы с паузой, небольшой интервал
 между запросами и 'предохранитель': после нескольких подряд сбоев на минуту перестаём
 обращаться к 2GIS (вызывающий код тогда использует оценку вместо данных API).
@@ -15,13 +10,14 @@ import time
 from pathlib import Path
 
 import requests
+from config import get_secret
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-DEBUG = True   # печатать причины сбоев в консоль; на демо поставьте False
-MIN_INTERVAL = 0.25    # сек между запросами (чтобы не упереться в лимит)
-MAX_FAILS = 3          # столько сбоев подряд -> пауза
-BLOCK_SECONDS = 60     # на сколько секунд отключаем 2GIS после серии сбоев
+DEBUG = True
+MIN_INTERVAL = 0.25
+MAX_FAILS = 3
+BLOCK_SECONDS = 60
 
 
 def _log(msg):
@@ -29,20 +25,7 @@ def _log(msg):
         print(f"[2gis] {msg}", file=sys.stderr)
 
 
-def _load_key():
-    key = os.getenv("TWOGIS_API_KEY")
-    if key:
-        return key.strip().strip("\"'")
-    env = Path(__file__).with_name(".env")
-    if env.exists():
-        for line in env.read_text(encoding="utf-8-sig").splitlines():
-            line = line.strip()
-            if line.startswith("TWOGIS_API_KEY"):
-                return line.partition("=")[2].strip().strip("\"'")
-    return None
-
-
-KEY = _load_key()
+KEY = get_secret("TWOGIS_API_KEY")
 CATALOG = "https://catalog.api.2gis.com"
 ROUTING = "https://routing.api.2gis.com"
 
@@ -51,8 +34,8 @@ def _make_retry():
     kw = dict(total=2, connect=2, read=2, backoff_factor=0.7,
               status_forcelist=(429, 500, 502, 503, 504))
     try:
-        return Retry(allowed_methods=None, **kw)       # повторять и POST (маршруты)
-    except TypeError:                                   # старый urllib3
+        return Retry(allowed_methods=None, **kw)
+    except TypeError:
         return Retry(method_whitelist=False, **kw)
 
 
@@ -65,7 +48,7 @@ def _request(method, url, timeout=10, **kw):
     """Один запрос с защитой от сбоев. Возвращает Response или None."""
     now = time.time()
     if now < _state["blocked_until"]:
-        return None                                     # 2GIS временно отключён
+        return None
     wait = MIN_INTERVAL - (now - _state["last"])
     if wait > 0:
         time.sleep(wait)
@@ -98,7 +81,7 @@ def _get(url, params):
             return None
         data = r.json()
         code = data.get("meta", {}).get("code")
-        if code == 404:                       # 'Results not found': ничего не найдено, это не сбой
+        if code == 404:
             return None
         if code != 200:
             _log(f"meta.code={code}: {data.get('meta')}")
@@ -133,7 +116,7 @@ def search_nearby(query, lat, lon, radius=3000, limit=10, extra_fields=""):
     extra_fields: дополнительные поля через запятую, например 'items.reviews,items.rubrics'."""
     data = _get(f"{CATALOG}/3.0/items", {
         "q": query,
-        "point": f"{lon},{lat}",          # 2GIS ждёт lon,lat
+        "point": f"{lon},{lat}",
         "radius": radius,
         "page_size": limit,
         "fields": "items.point,items.address,items.name" + (f",{extra_fields}" if extra_fields else ""),
@@ -160,7 +143,7 @@ def route(start, end, transport="driving"):
     if r is None:
         return None
     try:
-        if r.status_code == 204:              # нет содержимого: маршрут не построен
+        if r.status_code == 204:
             if not _state.get("warned_204"):
                 _state["warned_204"] = True
                 _log("routing: 204, маршрута нет (город вне покрытия 2GIS или точка не на дороге); "

@@ -1,0 +1,17 @@
+{
+  "Анталья": [
+    {"name": "Sea Breeze Hotel", "price": 4500, "stars": 4, "breakfast": true, "free_cancel": true, "to_center_km": 1.2},
+    {"name": "Budget Palm", "price": 2800, "stars": 3, "breakfast": false, "free_cancel": true, "to_center_km": 3.5},
+    {"name": "Family Resort", "price": 6200, "stars": 5, "breakfast": true, "free_cancel": false, "to_center_km": 0.8}
+  ],
+  "Сочи": [
+    {"name": "Riviera Park", "price": 5100, "stars": 4, "breakfast": true, "free_cancel": true, "to_center_km": 2.0},
+    {"name": "Hostel Wave", "price": 1900, "stars": 2, "breakfast": false, "free_cancel": true, "to_center_km": 4.0},
+    {"name": "Olympic Grand", "price": 7800, "stars": 5, "breakfast": true, "free_cancel": true, "to_center_km": 1.0}
+  ],
+  "Стамбул": [
+    {"name": "Bosphorus View", "price": 5500, "stars": 4, "breakfast": true, "free_cancel": true, "to_center_km": 1.5},
+    {"name": "Old City Inn", "price": 3200, "stars": 3, "breakfast": false, "free_cancel": true, "to_center_km": 0.5},
+    {"name": "Taksim Comfort", "price": 4100, "stars": 3, "breakfast": true, "free_cancel": false, "to_center_km": 0.3}
+  ]
+}

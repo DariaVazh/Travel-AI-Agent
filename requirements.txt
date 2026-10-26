@@ -1,5 +1,8 @@
 fastapi==0.115.12
 uvicorn==0.34.2
+SQLAlchemy[asyncio]==2.0.40
+asyncpg==0.30.0
+python-dotenv==1.1.0
 certifi==2026.10.23
 charset-normalizer==3.5.2
 flatbuffers==25.9.23

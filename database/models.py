@@ -8,7 +8,8 @@ from sqlalchemy import (
     Identity,
     func,
     ForeignKey,
-    Text
+    Text,
+    String
 )
 
 from sqlalchemy.dialects.postgresql import JSONB
@@ -36,6 +37,11 @@ class User(Base):
         BigInteger,
         unique=True,
         nullable=False
+    )
+
+    name: Mapped[str | None] = mapped_column(
+        String(128),
+        nullable=True
     )
 
     memory: Mapped[dict[str, Any]] = mapped_column(

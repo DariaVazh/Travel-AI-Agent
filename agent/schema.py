@@ -90,3 +90,30 @@ class TravelSlots(BaseModel):
 
         merged = deep_merge(data, upd)
         return TravelSlots.model_validate(merged)
+
+class Priority(BaseModel):
+    price: float = 0.5
+    time: float = 0.5
+
+class SearchDefaults(BaseModel):
+    transport: str = "plane"
+    max_transfers: int = 0
+    hotel_min_stars: Optional[int] = None
+    free_cancellation: bool = False
+    pets: bool = False
+    priority: Priority = Field(default_factory=Priority)
+
+class HotelPreferences(BaseModel):
+    breakfast: bool = False
+    amenities: list[str] = Field(default_factory=list)
+    location: list[str] = Field(default_factory=list)
+
+class UserProfile(BaseModel):
+    schema_version: int = 1
+    user_id: str = "default"
+    home_city: Optional[str] = None
+    search_defaults: SearchDefaults = Field(default_factory=SearchDefaults)
+    hotel_preferences: HotelPreferences = Field(default_factory=HotelPreferences)
+    interests: list[str] = Field(default_factory=list)
+    dislikes: list[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)

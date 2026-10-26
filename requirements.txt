@@ -15,3 +15,6 @@ requests==2.34.2
 urllib3==2.8.0
 urllib3-future==2.25.903
 wassima==2.1.5
+openai>=1.0.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0

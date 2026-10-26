@@ -1,4 +1,3 @@
-"""Контракт JSON между LLM (Даша), поиском (Настя), ботом (Соня) и БД (Денис)."""
 from datetime import date
 
 REQUIRED = ("origin", "destination", "date_from")

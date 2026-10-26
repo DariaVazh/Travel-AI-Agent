@@ -1,142 +1,123 @@
+import json
 import re
+import uuid
+
 from llm import extract_slots, reply_to_user
 from schema import TravelSlots
 from slots import mark_ready, needs_clarification
-from tools import inspire_destinations, mock_checkout, search_hotels
 from storage import save_route, list_routes
 
 
-def _find_hotel(fragment: str, hotels: list[dict]) -> dict | None:
-    if not fragment or not hotels:
-        return None
-    p = fragment.lower().strip()
-    for h in hotels:
-        name = h.get("name", "").lower()
-        if p in name or name in p:
-            return h
-    # по словам
-    for h in hotels:
-        name = h.get("name", "").lower()
-        if any(w in name for w in p.split() if len(w) > 3):
-            return h
-    return None
-
-
 class TravelAgent:
-    def __init__(self):
+    def __init__(self, user_id: str = "default"):
         self.slots = TravelSlots()
-        self.last_plan: dict | None = None
+        self.last_plan = None
+        self.user_id = user_id
+        self.session_id = f"rt_{uuid.uuid4().hex[:10]}"
+        # Улучшенная память: хранение истории диалога сессии
+        self.chat_history = []
+        # Сюда внешняя программа может положить свежий JSON с маршрутами
+        self.external_packages = []
+
+    def feed_external_routes(self, packages: list | dict):
+        """Метод для внешней программы, которая скидывает JSON с маршрутами."""
+        if isinstance(packages, dict):
+            packages = [packages]
+        self.external_packages = packages
+        self.last_plan = {"packages": packages}
+
+    def _autosave(self, note: str, package: dict | None = None, chosen: dict | None = None):
+        packages = self.external_packages or (self.last_plan or {}).get("packages") or []
+        if package is None and packages:
+            package = packages[0]
+        if package is not None and not isinstance(package, dict):
+            package = None
+
+        if package is None:
+            package = {
+                "package_id": self.session_id,
+                "query_raw": note,
+                "origin": self.slots.origin,
+                "destination": {"city": self.slots.destination},
+                "packages": packages,
+            }
+        else:
+            package = dict(package)
+            package["package_id"] = self.session_id
+            package["packages"] = packages
+
+        return save_route(
+            self.slots.model_dump(),
+            hotels=[],
+            chosen=chosen or package,
+            note=note,
+            user_id=self.user_id,
+            package=package,
+            route_id=self.session_id,
+        )
 
     def handle(self, user_text: str) -> str:
         text = user_text.strip()
         text_l = text.lower()
 
-        # ========== 1. БРОНЬ / ОФОРМИТЬ — ДО LLM ==========
+        # Добавляем сообщение пользователя в историю памяти
+        self.chat_history.append({"role": "user", "content": text})
+        # Ограничим историю последними 10 сообщениями, чтобы не раздувать контекст
+        if len(self.chat_history) > 10:
+            self.chat_history = self.chat_history[-10:]
+
+        # Обработка команды бронирования
         is_book = any(
-            w in text_l
-            for w in (
-                "бронь",
-                "брон",
-                "оформи",
-                "оформл",
-                "покупа",
-                "беру",
-                "выбираю",
-                "заброни",
-            )
+            w in text_l for w in ("бронь", "брон", "оформи", "оформл", "покупа", "беру", "выбираю", "заброни")
         )
         if is_book:
-            hotels = (self.last_plan or {}).get("hotels") or []
-            chosen = None
+            packages = self.external_packages or (self.last_plan or {}).get("packages") or []
+            if not packages:
+                answer = "Пока нет готовых маршрутов для бронирования. Дождитесь загрузки данных или опишите пожелания."
+                self.chat_history.append({"role": "assistant", "content": answer})
+                return answer
 
-            # «оформить Riviera Park» / «бронь Riviera на ноябрь»
-            m = re.search(
-                r"(?:бронь|брон\w*|оформи\w*|заброни\w*|беру|выбираю)\s+(.+)",
-                text,
-                flags=re.I,
-            )
-            tail = m.group(1).strip() if m else ""
-            # убрать «на ноябрь», «с 1 по 3»
-            tail_clean = re.sub(
-                r"\s+на\s+\S+.*$|\s+с\s+\d+.*$",
-                "",
-                tail,
-                flags=re.I,
-            ).strip()
+            chosen = packages[0]  # берем первый или ищем по тексту
+            chosen = dict(chosen)
+            chosen["selected"] = True
+            rec = self._autosave(note="book", package=chosen, chosen=chosen)
 
-            if tail_clean:
-                chosen = _find_hotel(tail_clean, hotels)
-            if not chosen and hotels:
-                chosen = hotels[0]
-
-            if not hotels:
-                return (
-                    "Пока нет списка отелей в этой сессии. "
-                    "Напишите сначала «в Сочи с ребёнком», потом «бронь Riviera Park»."
-                )
-
-            # даты из фразы (грубо)
-            if "ноябр" in text_l:
-                self.slots.dates.month = "ноябрь"
-            dm = re.search(r"с\s+(\d+)\s+по\s+(\d+)", text_l)
-            if dm and self.slots.dates.month == "ноябрь":
-                self.slots.dates.date_from = f"2026-11-{int(dm.group(1)):02d}"
-                self.slots.dates.date_to = f"2026-11-{int(dm.group(2)):02d}"
-
-            rec = save_route(
-                self.slots.model_dump(),
-                hotels,
-                chosen=chosen,
-                note="book_command",
-            )
-            name = chosen.get("name", "?") if chosen else "?"
-            return (
-                f"Готово. «{name}» сохранён как маршрут #{rec['id']}.\n"
-                f"Файл: data/saved_routes.json\n"
-                f"(Оплата имитирована.)"
-            )
+            answer = f"Готово! Маршрут успешно забронирован и сохранен (сессия #{rec['route_id']})."
+            self.chat_history.append({"role": "assistant", "content": answer})
+            return answer
 
         if text_l in {"мои маршруты", "сохранённые"}:
-            routes = list_routes()
+            routes = list_routes(user_id=self.user_id)
             if not routes:
-                return "Пока ничего не сохранено."
-            lines = []
-            for r in routes[-5:]:
-                ch = r.get("chosen") or {}
-                lines.append(f"#{r['id']}: {ch.get('name', '—')}")
-            return "\n".join(lines)
+                answer = "Пока ничего не сохранено."
+            else:
+                lines = []
+                for r in routes[-5:]:
+                    pkg = r.get("package") or r.get("chosen") or {}
+                    dest = pkg.get("destination", {})
+                    city = dest.get("city") if isinstance(dest, dict) else str(dest)
+                    lines.append(f"#{r.get('route_id')}: {city or 'Маршрут'}")
+                answer = "\n".join(lines)
+            self.chat_history.append({"role": "assistant", "content": answer})
+            return answer
 
-        # ========== 2. ОБЫЧНЫЙ ДИАЛОГ ==========
-        if "дешевле" in text_l and self.slots.budget.amount:
-            self.slots.budget.amount = float(self.slots.budget.amount) * 0.8
-
+        # Извлечение слотов (нейросеть понимает контекст и шутки)
         raw = extract_slots(user_text, self.slots.model_dump())
-        incoming = TravelSlots.model_validate(raw)
-        self.slots = mark_ready(self.slots.merge(incoming))
+        if raw:
+            incoming = TravelSlots.model_validate(raw)
+            self.slots = mark_ready(self.slots.merge(incoming))
 
-        question = needs_clarification(self.slots)
-        if question:
-            return question
-
-        if not self.slots.destination:
-            self.slots.intent = "inspire"
-            self.slots.destination_flexible = True
-
-        if self.slots.intent == "inspire" or not self.slots.destination:
-            ideas = inspire_destinations(self.slots)
-            return reply_to_user(
-                user_text,
-                {"slots": self.slots.model_dump(), "ideas": ideas},
-            )
-
-        options = search_hotels(self.slots)
-        self.last_plan = {
-            "destination": self.slots.destination
-            or (options[0]["city"] if options else None),
-            "dates": self.slots.dates.model_dump(),
-            "hotels": options,
+        # Формируем контекст для генерации ответа LLM
+        context = {
+            "slots": self.slots.model_dump(),
+            "chat_history": self.chat_history,
+            "available_packages": self.external_packages,
         }
-        return reply_to_user(
-            user_text,
-            {"slots": self.slots.model_dump(), "options": options},
-        )
+
+        full = reply_to_user(user_text, context)
+        if not full:
+            full = "Я внимательно слушаю! Чем могу помочь с вашей поездкой?"
+
+        self.chat_history.append({"role": "assistant", "content": full})
+        self._autosave(note="turn")
+        return full

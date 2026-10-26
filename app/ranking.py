@@ -48,7 +48,7 @@ def rank_hotels(hotels, w_price):
     min_total = min(totals)
     ranked = []
     for h, tot, a, r, d in zip(hotels, totals, pn, rn, dn):
-        quality = 0.5 * r + 0.3 * (1 - d) + 0.2 * (1 if h["free_cancellation"] else 0)
+        quality = 0.5 * r + 0.3 * (1 - d) + 0.2 * (1 if h.get("free_cancellation") else 0)
         score = w_price * (1 - a) + (1 - w_price) * quality
         pros, cons, risks = [], [], []
         if h.get("rating_adj", h["rating"]) >= 9:
@@ -57,8 +57,11 @@ def rank_hotels(hotels, w_price):
             pros.append("рядом с центром")
         elif h["distance_center_km"] > 5:
             cons.append(f"далеко от центра ({h['distance_center_km']} км)")
-        if h["free_cancellation"]:
+        fc = h.get("free_cancellation")
+        if fc:
             pros.append("бесплатная отмена")
+        elif fc is None:
+            risks.append("условия отмены не указаны: уточните при бронировании")
         else:
             risks.append("невозвратный тариф")
         if tot == min_total:

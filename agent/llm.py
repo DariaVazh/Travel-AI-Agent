@@ -1,6 +1,5 @@
 import json
 import re
-from openai import OpenAI
 
 from config import (
     APP_TITLE,
@@ -9,28 +8,15 @@ from config import (
     OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
 )
-
-SYSTEM_EXTRACT = """Правила:
-- Не выдумывай точные даты и суммы, если их не было.
-- Если направления нет, но есть «море/тепло/отдых» — destination_flexible=true, intent=inspire, ready_to_search=true.
-- Если мало данных — ВСЁ РАВНО ready_to_search=true и clarifying_question=null.
-- clarifying_question ставь ТОЛЬКО если сообщение пустое по смыслу (нет ни места, ни месяца, ни типа отдыха).
-- Не задавай больше одного вопроса; лучше null.
-- intent: inspire, если город неизвестен; search — если город есть.
-"""
-
-SYSTEM_REPLY = """Ты travel-агент Островка. Стиль: сначала польза, потом один мягкий вопрос (необязательно).
-Структура ответа:
-1) 2–3 конкретных варианта (город/отель, цена, почему подходит)
-2) Что можно сузить одной фразой: «если скажете месяц или потолок бюджета — сузим»
-Не устраивай допрос. Не задавай несколько вопросов подряд. Не пиши «уточните даты, бюджет и состав»."""
+from openai import OpenAI
 
 
 def get_client() -> OpenAI:
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError("Нет OPENROUTER_API_KEY в .env")
+    # Используем собранный ключ или плейсхолдер для защиты от аварийного завершения
+    api_key = OPENROUTER_API_KEY if OPENROUTER_API_KEY else "dummy_key"
+
     return OpenAI(
-        api_key=OPENROUTER_API_KEY,
+        api_key=api_key,
         base_url=OPENROUTER_BASE_URL,
         default_headers={
             "HTTP-Referer": HTTP_REFERER,
@@ -38,6 +24,19 @@ def get_client() -> OpenAI:
         },
     )
 
+SYSTEM_EXTRACT = """Ты — модуль анализа намерений и извлечения параметров (слотов) поездки.
+Внимательно читай сообщения пользователя и обновляй текущие слоты (направления, даты, бюджет, пожелания).
+Если пользователь шутит или пишет не по делу (не связано с путешествиями), не затирай старые слоты, а intent установи как 'smalltalk'.
+"""
+
+SYSTEM_REPLY = """Ты — дружелюбный travel-агент. Твоя задача — общаться с пользователем, очеловечивать готовые данные маршрутов и отелей, которые приходят в контексте в виде JSON, и отвечать с эмодзи.
+
+Правила поведения:
+1. Если пользователь шутит, отвлекается или говорит на отвлеченные темы — поддержи шутку или ответь вежливо, но обязательно мягко верни к выбору поездки или обсуждению маршрута.
+2. Если в контексте переданы готовые маршруты (packages) от внешней программы, представь их понятно, структурировано и привлекательно. Не придумывай цены и билеты из головы — опирайся строго на переданные данные.
+3. Если пользователь просит забронировать или выбрать конкретный вариант — подтверди выбор.
+4. Задавай не более одного уточняющего вопроса в конце.
+"""
 
 def parse_json(text: str) -> dict:
     text = text.strip()
@@ -46,15 +45,14 @@ def parse_json(text: str) -> dict:
         text = re.sub(r"\s*```$", "", text)
     m = re.search(r"\{.*\}", text, re.S)
     if not m:
-        raise ValueError(f"Модель не вернула JSON: {text[:200]}")
+        return {}
     return json.loads(m.group())
-
 
 def extract_slots(user_text: str, previous_slots: dict | None = None) -> dict:
     client = get_client()
     extra = ""
     if previous_slots:
-        extra = f"\n\nТекущие слоты (обнови, не обнуляй известное):\n{json.dumps(previous_slots, ensure_ascii=False)}"
+        extra = f"\n\nТекущие слоты:\n{json.dumps(previous_slots, ensure_ascii=False)}"
 
     resp = client.chat.completions.create(
         model=OPENROUTER_MODEL,
@@ -64,8 +62,10 @@ def extract_slots(user_text: str, previous_slots: dict | None = None) -> dict:
         ],
         temperature=0.2,
     )
-    return parse_json(resp.choices[0].message.content or "")
-
+    try:
+        return parse_json(resp.choices[0].message.content or "{}")
+    except Exception:
+        return {}
 
 def reply_to_user(user_text: str, context: dict) -> str:
     client = get_client()
@@ -75,9 +75,9 @@ def reply_to_user(user_text: str, context: dict) -> str:
             {"role": "system", "content": SYSTEM_REPLY},
             {
                 "role": "user",
-                "content": f"Сообщение пользователя: {user_text}\n\nКонтекст:\n{json.dumps(context, ensure_ascii=False)}",
+                "content": f"Сообщение пользователя: {user_text}\n\nКонтекст и данные маршрутов:\n{json.dumps(context, ensure_ascii=False)}",
             },
         ],
-        temperature=0.4,
+        temperature=0.5,
     )
     return (resp.choices[0].message.content or "").strip()

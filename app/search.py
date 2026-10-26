@@ -11,6 +11,7 @@ import hashlib
 import math
 import time
 
+from attractiveness import package_attractiveness
 from cities import COVERAGE_NOTE, get_city, is_unsupported
 from providers import HOTEL_PROVIDERS, TRANSPORT_PROVIDERS
 from ranking import check_compat, rank_hotels, rank_transport
@@ -20,7 +21,7 @@ from weather import get_weather, weather_text
 
 DISCLAIMER = ("Источники: Travelpayouts (кэш Aviasales), Яндекс.Расписания, 2GIS, Open-Meteo. "
               "Оценочные поля перечислены в data_sources.estimated.")
-CACHE_TTL = 300          # секунд хранить результаты провайдеров
+CACHE_TTL = 300
 _cache = {}
 
 
@@ -66,15 +67,15 @@ def _transport_ranked(q, leg, wp, wt):
 
     def fetch():
         found, covered = [], set()
-        for p in sorted(TRANSPORT_PROVIDERS, key=lambda p: p.is_mock):     # реальные первыми
+        for p in sorted(TRANSPORT_PROVIDERS, key=lambda p: p.is_mock):
             need = [m for m in modes if m not in covered] if p.is_mock else modes
             if not need:
                 continue
             res = p.search(a, b, day, need, q["max_transfers"])
             found += res
-            covered |= {o["mode"] for o in res}
+            covered |= {o["mode"] for o in res if not o["is_mock"]}
             if getattr(p, "authoritative", False) and getattr(p, "enabled", False):
-                covered |= p.modes        # у такого источника пусто = рейсов нет, моки не подмешиваем
+                covered |= p.modes
         return found
 
     found = _cached(("tr", a, b, day, tuple(modes), q["max_transfers"]), fetch)
@@ -88,6 +89,8 @@ def _hotels_ranked(q, wp):
     def fetch():
         found = []
         for p in sorted(HOTEL_PROVIDERS, key=lambda p: p.is_mock):
+            if p.is_mock and len(found) >= 3:
+                break
             found += p.search(q["destination"], q["date_from"], q["nights"], q["pets"])
         return found
 
@@ -96,10 +99,10 @@ def _hotels_ranked(q, wp):
     if q["pets"]:
         found = [h for h in found if h["pets_allowed"]]
     if q["free_cancellation"]:
-        found = [h for h in found if h["free_cancellation"]]
+        found = [h for h in found if h.get("free_cancellation") is not False]
     rooms = max(1, math.ceil(q["guests"] / 2))
     for h in found:
-        h["price_per_night"] *= rooms     # цена за все номера
+        h["price_per_night"] *= rooms
         h["rooms"] = rooms
     return rank_hotels(found, wp)
 
@@ -145,7 +148,7 @@ def _explain(pk):
         return
     min_price = min(p["total_price"] for p in pk)
     min_time = min(_travel_min(p) for p in pk)
-    ratings = [p["hotel"]["rating"] for p in pk if p["hotel"]]
+    ratings = [p["hotel"]["rating"] for p in pk if p["hotel"] and p["hotel"].get("rating") is not None]
     best = max(ratings) if ratings else None
     for p in pk:
         why, trade = [], []
@@ -159,7 +162,7 @@ def _explain(pk):
         else:
             trade.append(f"в дороге дольше на {(t - min_time) // 60} ч {(t - min_time) % 60} мин")
         h = p["hotel"]
-        if h and best is not None:
+        if h and best is not None and h.get("rating") is not None:
             if h["rating"] == best:
                 why.append(f"отель с лучшим рейтингом ({best})")
             elif best - h["rating"] >= 0.5:
@@ -169,15 +172,19 @@ def _explain(pk):
 
 
 def _data_sources(pk, _):
-    """Что в выдаче реальное, а что нет"""
+    """Что в выдаче реальное, а что нет (для честной пометки на демо)."""
     tr = {o["source"] for p in pk for o in (p["outbound"], p["return"]) if o}
     ht = {p["hotel"]["source"] for p in pk if p["hotel"]}
     tf = {p["transfer"]["source"] for p in pk if p.get("transfer")}
     estimated = []
-    if any(o and o.get("price_estimated") for p in pk for o in (p["outbound"], p["return"])):
-        estimated.append("цены на поезда")
-    if any(p["hotel"] and p["hotel"].get("price_estimated") for p in pk):
-        estimated.append("итоговая цена отелей за ваши даты")
+    if any(o and o.get("price_estimated") for p in pk for o in (p["outbound"], p["return"])) \
+            or "mock" in tr:
+        estimated.append("цены на поезда/часть билетов")
+    if any(p["hotel"] and (p["hotel"].get("price_estimated") or p["hotel"]["is_mock"]) for p in pk):
+        estimated.append("итоговая цена отелей за ваши даты и условия отмены"
+                         if "2gis" in ht and "mock" not in ht else "цены, звёзды, рейтинг и условия отелей")
+    if any(p["hotel"] and p["hotel"].get("price_source") == "2gis_from" for p in pk):
+        estimated.append("цена отелей за ваши даты: взята минимальная «цена от» из 2GIS")
     if "оценка" in tf or pk:
         estimated.append("стоимость трансфера")
     return {"transport": sorted(tr), "hotels": sorted(ht), "transfer": sorted(tf),
@@ -223,8 +230,6 @@ def plan_trip(raw, pinned=None):
     if err:
         return err
     pinned = pinned or {}
-    # (название, вес цены билетов, вес времени билетов, вес цены при выборе отеля).
-    # В "самом быстром" отель не выбираем по одному качеству: иначе получим самый дорогой люкс.
     hp = max(q["priority"]["price"], 0.5)
     presets = [("Самый дешёвый", 1.0, 0.0, 1.0), ("Самый быстрый", 0.0, 1.0, hp),
                ("Баланс по вашим приоритетам", q["priority"]["price"], q["priority"]["time"],
@@ -232,14 +237,17 @@ def plan_trip(raw, pinned=None):
     packages, kept, dropped, reasons = {}, set(), set(), set()
 
     for label, wp, wt, hw in presets:
-        o = _pick(_transport_ranked(q, "outbound", wp, wt), pinned.get("outbound"), "outbound", kept, dropped)
-        b = _pick(_transport_ranked(q, "return", wp, wt), pinned.get("return"), "return", kept, dropped)
+        out_list = _transport_ranked(q, "outbound", wp, wt)
+        back_list = _transport_ranked(q, "return", wp, wt)
+        hotel_list = _hotels_ranked(q, hw) if q["nights"] else []
+        o = _pick(out_list, pinned.get("outbound"), "outbound", kept, dropped)
+        b = _pick(back_list, pinned.get("return"), "return", kept, dropped)
         h = None
         if q["nights"] and o:
             remaining = None
-            if q["budget"] is not None:                      # сколько останется на отель после билетов
+            if q["budget"] is not None:
                 remaining = q["budget"] - (o["price"] + (b["price"] if b else 0)) * q["guests"] - 1500
-            h = _pick_hotel(_hotels_ranked(q, hw), pinned.get("hotel"), remaining, kept, dropped)
+            h = _pick_hotel(hotel_list, pinned.get("hotel"), remaining, kept, dropped)
         if not o:
             reasons.add("не нашлось подходящих билетов")
             continue
@@ -255,17 +263,20 @@ def plan_trip(raw, pinned=None):
         tr = get_transfer(o.get("arrival_coords"), h.get("coords")) if h else None
         total = legs + (h["total_price"] if h else 0) + (tr["price_estimate"] if tr else 0)
         warns = check_compat(o, b, h)
+        if h and q["free_cancellation"] and h.get("free_cancellation") is None:
+            warns.append("бесплатная отмена не подтверждена данными: уточните условия при бронировании")
         if tr and tr["duration_min"] > 60:
             warns.append(f"долгий трансфер до отеля: ~{tr['duration_min']} мин")
         if q["budget"] is not None and total > q["budget"]:
             warns.append(f"превышает бюджет на {int(total - q['budget'])} ₽")
         packages[key] = {
-            "id": "p" + hashlib.sha1("|".join(key).encode()).hexdigest()[:8],   # стабильный id
+            "id": "p" + hashlib.sha1("|".join(key).encode()).hexdigest()[:8],
             "labels": [label], "outbound": o, "return": b, "hotel": h, "transfer": tr,
             "transport_total": legs, "total_price": total,
             "within_budget": q["budget"] is None or total <= q["budget"],
             "warnings": warns,
         }
+        packages[key]["attractiveness"] = package_attractiveness(packages[key], q, hotel_list, out_list, back_list)
 
     pk = list(packages.values())
     _explain(pk)
@@ -327,7 +338,7 @@ def compare_destinations(raw, cities, top=5):
                 rows.append({"city": c, "status": "unsupported_city" if res.get("unsupported_cities")
                              else "unknown_city"})
                 continue
-            return res                                  # не хватает общих данных (даты, откуда)
+            return res
         if res["status"] != "ok":
             rows.append({"city": c, "status": "no_results", "reason": res.get("reason")})
             continue
@@ -356,9 +367,17 @@ def compare_destinations(raw, cities, top=5):
 # ───────────────────────── текст для чата ─────────────────────────
 def _tag(x):
     """Короткая пометка происхождения данных для текста."""
+    if x["is_mock"]:
+        return "демо"
     src = {"travelpayouts": "цена из кэша Aviasales", "yandex_rasp": "расписание Яндекса",
            "2gis": "отель из 2GIS"}.get(x["source"], x["source"])
-    return src + (", цена оценочная" if x.get("price_estimated") else "")
+    if x.get("price_estimated"):
+        suffix = ", цена оценочная"
+    elif x.get("price_source") == "2gis_from":
+        suffix = ", цена «от» из 2GIS"
+    else:
+        suffix = ""
+    return src + suffix
 
 
 def to_text(packages):
@@ -374,13 +393,19 @@ def to_text(packages):
         if h:
             stars = f"{h['stars']}★" if h.get("stars") else "без категории"
             reviews = f" ({h['reviews']} отз.)" if h.get("reviews") else ""
-            lines.append(f"  Отель: {h['name']}, {stars}, рейтинг {h['rating']}{reviews}, "
+            rating = f"рейтинг {h['rating']}" if h.get("rating") is not None else "рейтинга нет"
+            lines.append(f"  Отель: {h['name']}, {stars}, {rating}{reviews}, "
                          f"{int(h['total_price'])} ₽ ({_tag(h)})")
             if h.get("amenities"):
                 lines.append("  Удобства (2GIS): " + ", ".join(h["amenities"][:5]))
         if tr:
             lines.append(f"  Трансфер до отеля: ~{tr['duration_min']} мин, {tr['distance_km']} км, "
                          f"≈{tr['price_estimate']} ₽ ({tr['source']})")
+        a = p.get("attractiveness")
+        if a:
+            parts = [f"дорога {a['route']['score']}"] + ([f"отель {a['hotel']['score']}"] if a["hotel"] else [])
+            lines.append(f"  Оценка привлекательности: {a['score']}/100 ({a['label']}; {', '.join(parts)}; "
+                         f"надёжность оценки {int(a['confidence'] * 100)}%)")
         lines.append("  Почему: " + ", ".join(p["why"]))
         if p["tradeoffs"]:
             lines.append("  Чем пришлось пожертвовать: " + ", ".join(p["tradeoffs"]))
@@ -391,3 +416,4 @@ def to_text(packages):
             lines.append(f"  ⚠ {w}")
         lines.append("")
     return "\n".join(lines).strip()
+

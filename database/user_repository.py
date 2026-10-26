@@ -35,24 +35,6 @@ async def get_user_memory(telegram_id: int) -> dict:
         return memory if memory is not None else {}
 
 
-# async def save_user_memory(telegram_id: int, memory: dict) -> None:
-#     stmt = insert(User).values(
-#         telegram_id=telegram_id,
-#         memory=memory
-#     )
-#
-#     stmt = stmt.on_conflict_do_update(
-#         index_elements=[User.telegram_id],
-#         set_={
-#             "memory": stmt.excluded.memory,
-#             "updated_at": func.now()
-#         }
-#     )
-#
-#     async with AsyncSessionLocal.begin() as session:
-#         await session.execute(stmt)
-
-
 async def update_user_memory(telegram_id: int, changes: dict) -> None:
 
     async with AsyncSessionLocal.begin() as session:

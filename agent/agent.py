@@ -1,128 +1,132 @@
-import json
+import asyncio
 import uuid
+from slots_schema import TravelSlots, UserProfile
+import asyncio
+import uuid
+from .slots_schema import TravelSlots, UserProfile[cite: 12, 18]
+from .llm import extract_slots, reply_to_user[cite: 12, 14]
+from .llm_config import slots_to_query[cite: 12, 15]
+from .storage import save_route, list_routes[cite: 12, 19]
 
-from llm import extract_slots, reply_to_user, extract_user_profile
-from schema import TravelSlots, UserProfile
-from slots import mark_ready
-from storage import save_route, list_routes
+# Обязательные импорты реальных функций из внешней папки app/
+from app.search import plan_trip, replan, compare_destinations[cite: 12]
+from app.cart import build_cart, mock_checkout[cite: 12]
+from app.output import to_api, to_api_compare[cite: 12]
 
+COVERAGE_CITIES = ["Сочи", "Москва", "Санкт-Петербург", "Казань", "Калининград"][cite: 12]
 
 class TravelAgent:
     def __init__(self, user_id: str = "default"):
-        self.slots = TravelSlots()
-        self.last_plan = None
-        self.user_id = user_id
-        self.session_id = f"rt_{uuid.uuid4().hex[:10]}"
-        self.chat_history = []
-        self.external_packages = []
-        # Храним текущий профиль пользователя
-        self.user_profile = UserProfile(user_id=user_id).model_dump()
+        self.slots = TravelSlots()[cite: 12, 18]
+        self.user_id = user_id[cite: 12]
+        self.session_id = f"rt_{uuid.uuid4().hex[:10]}"[cite: 12]
+        self.chat_history = [][cite: 12]
+        self.user_profile = UserProfile(user_id=user_id).model_dump()[cite: 12, 18]
 
-    def feed_external_routes(self, packages: list | dict):
-        """Метод для внешней программы, которая скидывает JSON с маршрутами."""
-        if isinstance(packages, dict):
-            packages = [packages]
-        self.external_packages = packages
-        self.last_plan = {"packages": packages}
+        self.raw_res = None[cite: 12]
+        self.active_cart = None[cite: 12]
+        self.booking_state = None  # None | "awaiting_checkout_info"[cite: 12]
+
+    def feed_external_routes(self, data: dict):
+        """Принимает JSON с готовыми маршрутами от внешней программы."""
+        self.raw_res = data
 
     def get_user_profile_json(self) -> dict:
-        """Метод для получения итогового JSON профиля пользователя."""
-        raw_profile = extract_user_profile(
-            user_id=self.user_id,
-            chat_history=self.chat_history,
-            current_profile=self.user_profile,
-        )
-        self.user_profile = UserProfile.model_validate(raw_profile).model_dump()
         return self.user_profile
 
-    def _autosave(self, note: str, package: dict | None = None, chosen: dict | None = None):
-        packages = self.external_packages or (self.last_plan or {}).get("packages") or []
-        if package is None and packages:
-            package = packages[0]
-        if package is not None and not isinstance(package, dict):
-            package = None
-
-        if package is None:
-            package = {
-                "package_id": self.session_id,
-                "query_raw": note,
-                "origin": self.slots.origin,
-                "destination": {"city": self.slots.destination},
-                "packages": packages,
-            }
-        else:
-            package = dict(package)
-            package["package_id"] = self.session_id
-            package["packages"] = packages
-
-        # Сохраняем сессию вместе с обновленным профилем пользователя
-        return save_route(
-            self.slots.model_dump(),
-            hotels=[],
-            chosen=chosen or package,
-            note=note,
-            user_id=self.user_id,
-            package=package,
-            route_id=self.session_id,
-        )
-
-    def handle(self, user_text: str) -> str:
+    async def handle_async(self, user_text: str) -> dict:
         text = user_text.strip()
         text_l = text.lower()
-
         self.chat_history.append({"role": "user", "content": text})
-        if len(self.chat_history) > 10:
-            self.chat_history = self.chat_history[-10:]
 
-        # Бронирование
-        is_book = any(
-            w in text_l for w in ("бронь", "брон", "оформи", "оформл", "покупа", "беру", "выбираю", "заброни")
-        )
-        if is_book:
-            packages = self.external_packages or (self.last_plan or {}).get("packages") or []
-            if not packages:
-                answer = "Пока нет готовых маршрутов для бронирования."
-                self.chat_history.append({"role": "assistant", "content": answer})
-                return answer
+        # --- Пункт 4: Логика демо-бронирования ---
+        if self.booking_state == "awaiting_checkout_info" and self.active_cart:
+            traveler_info = {"raw_input": text}
+            result = mock_checkout(self.active_cart, traveler_info)
+            self.booking_state = None
+            self.active_cart = None
 
-            chosen = dict(packages[0])
-            chosen["selected"] = True
-            rec = self._autosave(note="book", package=chosen, chosen=chosen)
+            return {
+                "text": f"✅ Оформлена **демо-бронь** (№ {result.get('order_id')}).\n"
+                        f"Имитация оплаты прошла успешно. Настоящее бронирование не создавалось.",
+                "buttons": []
+            }
 
-            answer = f"Готово! Маршрут забронирован (сессия #{rec['route_id']})."
-            self.chat_history.append({"role": "assistant", "content": answer})
-            return answer
+        # Выбор конкретного пакета по callback/id (например, pick:p643aa061)
+        if text_l.startswith("pick:") or "выбираю" in text_l or "оформить" in text_l:
+            pkg_id = text.split(":")[-1].strip() if ":" in text else None
 
-        if text_l in {"мои маршруты", "сохранённые"}:
-            routes = list_routes(user_id=self.user_id)
-            if not routes:
-                answer = "Пока ничего не сохранено."
-            else:
-                lines = [f"#{r.get('route_id')}: {r.get('chosen', {}).get('destination', {}).get('city', 'Маршрут')}" for r in routes[-5:]]
-                answer = "\n".join(lines)
-            self.chat_history.append({"role": "assistant", "content": answer})
-            return answer
+            selected_package = None
+            if self.raw_res and "packages" in self.raw_res:
+                for pkg in self.raw_res["packages"]:
+                    if pkg.get("id") == pkg_id or not pkg_id:
+                        selected_package = pkg
+                        break
 
-        # Слоты
-        raw = extract_slots(user_text, self.slots.model_dump())
-        if raw:
-            incoming = TravelSlots.model_validate(raw)
-            self.slots = mark_ready(self.slots.merge(incoming))
+            if selected_package:
+                self.active_cart = build_cart(selected_package, self.raw_res["query"])
+                self.booking_state = "awaiting_checkout_info"
+                return {
+                    "text": "Для оформления **демо-брони** укажите, пожалуйста, ваше имя, телефон и имена всех гостей.",
+                    "buttons": []
+                }
+            return {"text": "Не удалось найти выбранный пакет для демо-брони.", "buttons": []}
 
-        context = {
-            "slots": self.slots.model_dump(),
-            "chat_history": self.chat_history,
-            "available_packages": self.external_packages,
+        # --- Пункт 2: Запрос «куда поехать» ---
+        if "куда поехать" in text_l or "предложи направления" in text_l:
+            res_comp = compare_destinations(text, COVERAGE_CITIES, self.slots)
+            self.raw_res = res_comp
+            api_out = to_api_compare(res_comp)
+            return {
+                "text": api_out.get("fallback_text", "Вот доступные направления для отдыха:"),
+                "buttons": api_out.get("buttons", [])
+            }
+
+        # --- Пункт 1 & 7: Извлечение слотов, адаптер, поиск через plan_trip ---
+        raw_slots = extract_slots(user_text, self.slots.model_dump())
+        if raw_slots:
+            self.slots = TravelSlots.model_validate(raw_slots)
+
+        query = slots_to_query(self.slots)
+
+        # Вызов реальной функции поиска из app/
+        self.raw_res = plan_trip(query)
+
+        # Обработка нехватки данных (missing / errors)
+        if self.raw_res.get("missing") or self.raw_res.get("errors"):
+            missing_fields = ", ".join(self.raw_res.get("missing", []))
+            err_msg = ", ".join(self.raw_res.get("errors", []))
+            msg = "Пожалуйста, уточните следующие данные:"
+            if missing_fields:
+                msg += f"\n- Обязательные поля: {missing_fields}"
+            if err_msg:
+                msg += f"\n- Ошибки: {err_msg}"
+            return {"text": msg, "buttons": []}
+
+        # Обработка отсутствия результатов (no_results -> suggestions)
+        if self.raw_res.get("no_results") and self.raw_res.get("suggestions"):
+            sugg_text = "\n".join([f"• {s}" for s in self.raw_res["suggestions"]])
+            return {
+                "text": f"К сожалению, по вашему запросу ничего не найдено. Рекомендуем посмотреть:\n{sugg_text}",
+                "buttons": []
+            }
+
+        # Генерация API ответа через output.py
+        api_out = to_api(self.raw_res)
+
+        # Очеловечивание через LLM
+        human_text = reply_to_user(user_text, {"api_data": api_out, "history": self.chat_history[-5:]})
+        self.chat_history.append({"role": "assistant", "content": human_text})
+
+        # --- Пункт 6: Возврат словаря с text и buttons ---
+        return {
+            "text": human_text,
+            "buttons": api_out.get("buttons", [])
         }
 
-        full = reply_to_user(user_text, context)
-        if not full:
-            full = "Я на связи! Чем помочь с поездкой?"
+    # --- Пункт 6: Вызов через to_thread ---
+    def handle(self, user_text: str) -> dict:
+        return asyncio.run(asyncio.to_thread(self._handle_sync, user_text))
 
-        self.chat_history.append({"role": "assistant", "content": full})
-
-        # Обновляем профиль пользователя после реплики
-        self.get_user_profile_json()
-
-        self._autosave(note="turn")
-        return full
+    def _handle_sync(self, user_text: str) -> dict:
+        return asyncio.run(self.handle_async(user_text))

@@ -1,4 +1,4 @@
-from schema import TravelSlots
+from slots_schema import TravelSlots
 
 
 def needs_clarification(slots: TravelSlots) -> str | None:

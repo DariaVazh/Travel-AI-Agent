@@ -1,0 +1,96 @@
+[
+  {
+    "id": 1,
+    "saved_at": "2026-10-25T21:14:57.404524+00:00",
+    "note": "book_command",
+    "slots": {
+      "intent": "search",
+      "origin": null,
+      "destination": "Сочи",
+      "destination_flexible": false,
+      "dates": {
+        "date_from": "2025-11-01",
+        "date_to": "2025-11-03",
+        "flexible_days": 0,
+        "month": "11"
+      },
+      "budget": {
+        "amount": null,
+        "currency": "RUB",
+        "unlimited": false,
+        "per_person": true
+      },
+      "travelers": {
+        "adults": 1,
+        "children": 1,
+        "infants": 0
+      },
+      "transport": {
+        "modes": [
+          "any"
+        ],
+        "max_hours": null,
+        "no_night_transfers": false
+      },
+      "preferences": {
+        "sea": true,
+        "warm": true,
+        "with_child_friendly": true,
+        "pets": false,
+        "hotel_stars_min": null
+      },
+      "missing_fields": [
+        "origin",
+        "budget"
+      ],
+      "clarifying_question": null,
+      "ready_to_search": true
+    },
+    "options": [
+      {
+        "name": "Riviera Park",
+        "price": 5100,
+        "stars": 4,
+        "breakfast": true,
+        "free_cancel": true,
+        "to_center_km": 2.0,
+        "city": "Сочи",
+        "score": 4.0,
+        "reason": "завтрак, бесплатная отмена, удобно с детьми"
+      },
+      {
+        "name": "Olympic Grand",
+        "price": 7800,
+        "stars": 5,
+        "breakfast": true,
+        "free_cancel": true,
+        "to_center_km": 1.0,
+        "city": "Сочи",
+        "score": 4.0,
+        "reason": "завтрак, бесплатная отмена, удобно с детьми"
+      },
+      {
+        "name": "Hostel Wave",
+        "price": 1900,
+        "stars": 2,
+        "breakfast": false,
+        "free_cancel": true,
+        "to_center_km": 4.0,
+        "city": "Сочи",
+        "score": 2.0,
+        "reason": "бесплатная отмена"
+      }
+    ],
+    "chosen": {
+      "name": "Riviera Park",
+      "price": 5100,
+      "stars": 4,
+      "breakfast": true,
+      "free_cancel": true,
+      "to_center_km": 2.0,
+      "city": "Сочи",
+      "score": 4.0,
+      "reason": "завтрак, бесплатная отмена, удобно с детьми"
+    }
+  }
+]

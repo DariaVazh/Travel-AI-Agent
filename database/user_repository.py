@@ -1,7 +1,7 @@
 from sqlalchemy import select, func, update
 from sqlalchemy.dialects.postgresql import insert
-from connection import AsyncSessionLocal
-from models import User
+from .connection import AsyncSessionLocal
+from .models import User
 
 
 async def get_or_create_user(telegram_id: int, name: str,) -> int:
@@ -122,8 +122,6 @@ async def get_user_profile(
         return {
             "id": user.id,
             "telegram_id": user.telegram_id,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "username": user.username,
+            "full_name": user.name,
             "phone_number": user.phone_number
         }

@@ -76,7 +76,7 @@ async def start(message: Message, state: FSMContext):
         # Если новый — просим контакт
         await message.answer(
             "Привет! Скажа куда хочешь отправиться - остальное устроит агент ✈️\n"
-            "Сначала зарегистрируемся — нажми кнопку ниже.",
+            "Сначала зарегистрируемся — нажми кнопку «Отправить контакт».",
             reply_markup=get_main_menu(),
         )
         await state.set_state(Flow.waiting_contact)

@@ -1,4 +1,4 @@
-from slots_schema import TravelSlots
+from agent.slots_schema import TravelSlots
 
 
 def needs_clarification(slots: TravelSlots) -> str | None:

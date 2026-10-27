@@ -1,7 +1,7 @@
 """Трансфер аэропорт/вокзал -> отель. Время и расстояние берём из 2GIS,
 если не получилось (нет ключа, сеть) - грубая оценка, и это честно помечается."""
-import twogis
-from cities import haversine_km
+from app import twogis
+from app.cities import haversine_km
 _cache = {}
 
 

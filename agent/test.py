@@ -1,4 +1,4 @@
-from agent import TravelAgent
+from agent.agent import TravelAgent
 
 def main():
     # Создаем экземпляр агента

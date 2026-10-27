@@ -7,8 +7,8 @@ import re
 import time
 from pathlib import Path
 
-import twogis
-from cities import get_city, haversine_km
+from app import twogis
+from app.cities import get_city, haversine_km
 
 CACHE_FILE = Path(__file__).with_name(".hotels_cache_v2.json")
 CACHE_TTL = 7 * 24 * 3600

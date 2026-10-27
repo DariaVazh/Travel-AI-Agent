@@ -3,7 +3,7 @@
 import random
 from datetime import datetime, timedelta
 
-from cities import get_city, haversine_km
+from app.cities import get_city, haversine_km
 
 class TransportProvider:
     """search() должен вернуть список dict с полями: id, mode ('plane'|'train'), carrier,
@@ -29,12 +29,12 @@ class HotelProvider:
 
 
 
-from travelpayouts import TravelpayoutsFlights
+from app.travelpayouts import TravelpayoutsFlights
 
 
-from yandex_rasp import YandexTrains
-from hotels_2gis import Hotels2GIS
-import twogis
+from app.yandex_rasp import YandexTrains
+from app.hotels_2gis import Hotels2GIS
+from app import twogis
 
 _flights, _trains = TravelpayoutsFlights(), YandexTrains()
 TRANSPORT_PROVIDERS = [_flights, _trains]

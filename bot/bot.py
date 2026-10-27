@@ -1,9 +1,6 @@
 import os
 import asyncio
 import logging
-import random
-import string
-import re
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
@@ -14,10 +11,13 @@ from aiogram.types import (
     Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
     InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
-
 from agent.agent import TravelAgent
-import database
 from agent import storage
+from database.user_repository import (
+    get_or_create_user,
+    get_user_profile,
+    save_user_phone
+)
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -51,10 +51,18 @@ def get_chat_keyboard():
 
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
+
+    tg_user = message.from_user
+
+    await get_or_create_user(
+        telegram_id=tg_user.id,
+        name=tg_user.full_name
+    )
+
+    user = await get_user_profile(tg_user.id)
+
     # Проверяем, зарегистрирован ли пользователь (по базе)
-    user = database.get_user(message.from_user.id)
-    
-    if user:
+    if user["phone_number"]:
         # Если уже зарегистрирован, сразу в чат
         await message.answer(
             f"С возвращением, {user['full_name']}!\n"
@@ -62,8 +70,8 @@ async def start(message: Message, state: FSMContext):
             reply_markup=get_main_menu(),
         )
         await state.set_state(Flow.chatting)
-        if message.from_user.id not in user_agents:
-            user_agents[message.from_user.id] = TravelAgent(user_id=str(message.from_user.id))
+        if tg_user.id not in user_agents:
+            user_agents[tg_user.id] = TravelAgent(user_id=str(tg_user.id))
     else:
         # Если новый — просим контакт
         await message.answer(
@@ -76,15 +84,46 @@ async def start(message: Message, state: FSMContext):
 # КНОПКА "НАЙТИ ПОЕЗДКУ"
 @router.message(F.text == "Найти поездку")
 async def find_trip(message: Message, state: FSMContext):
+
+    user = await get_user_profile(message.from_user.id)
+
+    if user is None or not user["phone_number"]:
+        await message.answer(
+            "Сначала зарегистрируйтесь",
+            reply_markup=get_main_menu()
+        )
+        await state.set_state(Flow.waiting_contact)
+        return
+
     await message.answer("Отлично! Куда хотите поехать? Опишите свою идеальную поездку.", reply_markup=ReplyKeyboardRemove())
     await state.set_state(Flow.chatting)
 
 #РЕГИСТРАЦИЯ
-@router.message(Flow.waiting_contact, F.contact)
+@router.message(F.contact)
 async def on_contact(message: Message, state: FSMContext):
-    database.save_user(message.from_user.id, message.from_user.full_name, message.contact.phone_number)
-    user_agents[message.from_user.id] = TravelAgent(user_id=str(message.from_user.id))
-    
+
+    contact = message.contact
+    telegram_id = message.from_user.id
+
+    if contact.user_id != telegram_id:
+        await message.answer(
+            "Пожалуйста, отправь свой номер "
+            "через кнопку «Отправить контакт»."
+        )
+        return
+
+    await get_or_create_user(
+        telegram_id=telegram_id,
+        name=message.from_user.full_name
+    )
+
+    await save_user_phone(
+        telegram_id=telegram_id,
+        phone_number=contact.phone_number
+    )
+
+    user_agents[telegram_id] = TravelAgent(user_id=str(telegram_id))
+
     await message.answer(
         f"Спасибо, {message.from_user.full_name}!\n"
         "Теперь опиши свою идеальную поездку (куда, когда, с кем, бюджет).",
@@ -204,7 +243,6 @@ async def process_restart(message: Message, state: FSMContext):
     await state.set_state(Flow.chatting)
 
 async def main():
-    database.init_db()
     bot = Bot(token=os.getenv("BOT_TOKEN"))
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)

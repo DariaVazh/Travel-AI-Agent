@@ -44,6 +44,11 @@ class User(Base):
         nullable=True
     )
 
+    phone_number: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True
+    )
+
     memory: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         default=dict,

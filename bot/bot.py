@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 
 from agent.agent import TravelAgent
-import database
+from bot import database
 from agent import storage
 
 load_dotenv()

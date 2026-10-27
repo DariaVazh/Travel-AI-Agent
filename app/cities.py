@@ -3,7 +3,7 @@
 import re
 from math import asin, cos, radians, sin, sqrt
 
-import twogis
+from app import twogis
 
 # название: ((широта, долгота) центра, (широта, долгота) аэропорта или None)
 # Координаты приблизительные, для погоды и трансфера этого достаточно.

@@ -2,8 +2,8 @@
 import json
 from datetime import date, timedelta
 
-from cart import build_cart, mock_checkout
-from search import compare_destinations, plan_trip, replan
+from app.cart import build_cart, mock_checkout
+from app.search import compare_destinations, plan_trip, replan
 
 d = lambda n: (date.today() + timedelta(days=n)).isoformat()
 

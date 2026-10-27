@@ -9,10 +9,25 @@ services:
 
     env_file:
       - .env
-
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  bot:
+    build: .
+    command: ["python", "-m", "bot.bot"]
+    env_file:
+      - .env
+    volumes:
+      - bot_data:/app/data
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  bot_data:
+
+

@@ -4,8 +4,8 @@ from datetime import date, timedelta
 
 import requests
 
-import travelpayouts
-from config import get_secret
+from app import travelpayouts
+from app.config import get_secret
 
 token = get_secret("TRAVELPAYOUTS_TOKEN")
 print("Токен найден:", bool(token))

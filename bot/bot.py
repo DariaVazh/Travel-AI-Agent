@@ -1,6 +1,9 @@
 import os
 import asyncio
 import logging
+import random
+import string
+import re
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart

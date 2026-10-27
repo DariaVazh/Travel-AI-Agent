@@ -21,6 +21,8 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 COPY app/ ./app/
+COPY agent/ ./agent/
+COPY bot/ ./bot/
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser

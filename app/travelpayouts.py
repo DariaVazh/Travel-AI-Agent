@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 
 import requests
 
-from cities import get_city
-from config import get_secret
+from app.cities import get_city
+from app.config import get_secret
 
 URL = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
 DEBUG = True

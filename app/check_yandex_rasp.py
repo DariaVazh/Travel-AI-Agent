@@ -6,8 +6,8 @@ from datetime import date, timedelta
 
 import requests
 
-from cities import get_city
-from config import get_secret
+from app.cities import get_city
+from app.config import get_secret
 
 BASE = "https://api.rasp.yandex.net/v3.0"
 key = get_secret("YANDEX_RASP_KEY")

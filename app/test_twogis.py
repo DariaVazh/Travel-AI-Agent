@@ -1,6 +1,6 @@
 """Проверка 2GIS. Запуск: python test_twogis.py"""
-import twogis
-from transfer import get_transfer
+from app import twogis
+from app.transfer import get_transfer
 
 print("Ключ найден:", bool(twogis.KEY))
 

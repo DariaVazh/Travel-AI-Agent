@@ -1,31 +1,27 @@
 import asyncio
 import uuid
-from slots_schema import TravelSlots, UserProfile
-import asyncio
-import uuid
-from .slots_schema import TravelSlots, UserProfile[cite: 12, 18]
-from .llm import extract_slots, reply_to_user[cite: 12, 14]
-from .llm_config import slots_to_query[cite: 12, 15]
-from .storage import save_route, list_routes[cite: 12, 19]
+from .slots_schema import TravelSlots, UserProfile
+from .llm import extract_slots, reply_to_user
+from .llm_config import slots_to_query
+from .storage import save_route, list_routes
 
-# Обязательные импорты реальных функций из внешней папки app/
-from app.search import plan_trip, replan, compare_destinations[cite: 12]
-from app.cart import build_cart, mock_checkout[cite: 12]
-from app.output import to_api, to_api_compare[cite: 12]
+from app.planner import plan_trip, replan, compare_destinations
+from app.cart import build_cart, mock_checkout
+from app.output import to_api
 
-COVERAGE_CITIES = ["Сочи", "Москва", "Санкт-Петербург", "Казань", "Калининград"][cite: 12]
+COVERAGE_CITIES = ["Сочи", "Москва", "Санкт-Петербург", "Казань", "Калининград"]
 
 class TravelAgent:
     def __init__(self, user_id: str = "default"):
-        self.slots = TravelSlots()[cite: 12, 18]
-        self.user_id = user_id[cite: 12]
-        self.session_id = f"rt_{uuid.uuid4().hex[:10]}"[cite: 12]
-        self.chat_history = [][cite: 12]
-        self.user_profile = UserProfile(user_id=user_id).model_dump()[cite: 12, 18]
+        self.slots = TravelSlots()
+        self.user_id = user_id
+        self.session_id = f"rt_{uuid.uuid4().hex[:10]}"
+        self.chat_history = []
+        self.user_profile = UserProfile(user_id=user_id).model_dump()
 
-        self.raw_res = None[cite: 12]
-        self.active_cart = None[cite: 12]
-        self.booking_state = None  # None | "awaiting_checkout_info"[cite: 12]
+        self.raw_res = None
+        self.active_cart = None
+        self.booking_state = None  # None | "awaiting_checkout_info"
 
     def feed_external_routes(self, data: dict):
         """Принимает JSON с готовыми маршрутами от внешней программы."""
@@ -39,7 +35,7 @@ class TravelAgent:
         text_l = text.lower()
         self.chat_history.append({"role": "user", "content": text})
 
-        # --- Пункт 4: Логика демо-бронирования ---
+        # --- Логика демо-бронирования ---
         if self.booking_state == "awaiting_checkout_info" and self.active_cart:
             traveler_info = {"raw_input": text}
             result = mock_checkout(self.active_cart, traveler_info)
@@ -64,7 +60,8 @@ class TravelAgent:
                         break
 
             if selected_package:
-                self.active_cart = build_cart(selected_package, self.raw_res["query"])
+                query_data = self.raw_res.get("query", text)
+                self.active_cart = build_cart(selected_package, query_data)
                 self.booking_state = "awaiting_checkout_info"
                 return {
                     "text": "Для оформления **демо-брони** укажите, пожалуйста, ваше имя, телефон и имена всех гостей.",
@@ -72,24 +69,24 @@ class TravelAgent:
                 }
             return {"text": "Не удалось найти выбранный пакет для демо-брони.", "buttons": []}
 
-        # --- Пункт 2: Запрос «куда поехать» ---
+        # --- Запрос «куда поехать» ---
         if "куда поехать" in text_l or "предложи направления" in text_l:
             res_comp = compare_destinations(text, COVERAGE_CITIES, self.slots)
             self.raw_res = res_comp
-            api_out = to_api_compare(res_comp)
+            api_out = to_api(res_comp)
             return {
-                "text": api_out.get("fallback_text", "Вот доступные направления для отдыха:"),
+                "text": api_out.get("text", "Вот доступные направления для отдыха:"),
                 "buttons": api_out.get("buttons", [])
             }
 
-        # --- Пункт 1 & 7: Извлечение слотов, адаптер, поиск через plan_trip ---
+        # --- Извлечение слотов, адаптер, поиск через plan_trip ---
         raw_slots = extract_slots(user_text, self.slots.model_dump())
         if raw_slots:
             self.slots = TravelSlots.model_validate(raw_slots)
 
         query = slots_to_query(self.slots)
 
-        # Вызов реальной функции поиска из app/
+        # Вызов функции поиска из app/
         self.raw_res = plan_trip(query)
 
         # Обработка нехватки данных (missing / errors)
@@ -118,13 +115,11 @@ class TravelAgent:
         human_text = reply_to_user(user_text, {"api_data": api_out, "history": self.chat_history[-5:]})
         self.chat_history.append({"role": "assistant", "content": human_text})
 
-        # --- Пункт 6: Возврат словаря с text и buttons ---
         return {
             "text": human_text,
             "buttons": api_out.get("buttons", [])
         }
 
-    # --- Пункт 6: Вызов через to_thread ---
     def handle(self, user_text: str) -> dict:
         return asyncio.run(asyncio.to_thread(self._handle_sync, user_text))
 

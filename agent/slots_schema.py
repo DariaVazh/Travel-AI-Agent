@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Any, Optional
 from pydantic import BaseModel, Field, field_validator
 
@@ -6,6 +7,26 @@ class Dates(BaseModel):
     date_to: Optional[str] = None
     flexible_days: int = 0
     month: Optional[str] = None
+
+    @field_validator("month", mode="before")
+    @classmethod
+    def month_to_str(cls, v):
+        if v is None:
+            return None
+        return str(v)
+
+    @field_validator("date_from", "date_to", mode="before")
+    @classmethod
+    def validate_not_past(cls, v):
+        if not v or not isinstance(v, str):
+            return None
+        try:
+            parsed_date = date.fromisoformat(v)
+            if parsed_date < date.today():
+                return None
+        except ValueError:
+            pass
+        return v
 
 class Budget(BaseModel):
     amount: Optional[float] = None
@@ -35,6 +56,28 @@ class Transport(BaseModel):
     max_hours: Optional[float] = None
     no_night_transfers: bool = False
 
+    @field_validator("modes", mode="before")
+    @classmethod
+    def validate_modes(cls, v):
+        if not v:
+            return ["any"]
+        if isinstance(v, str):
+            v = [v]
+        mapping = {
+            "самолет": "plane", "самолёт": "plane", "самолетом": "plane", "самолётом": "plane", "рейс": "plane",
+            "поезд": "train", "поездом": "train", "жд": "train", "железная дорога": "train",
+            "любой": "any", "любым": "any", "любые": "any"
+        }
+        cleaned = []
+        for item in v:
+            item_str = str(item).lower().strip()
+            val = mapping.get(item_str, item_str)
+            if val in {"plane", "train", "any"}:
+                cleaned.append(val)
+            else:
+                cleaned.append("any")
+        return cleaned or ["any"]
+
 class Preferences(BaseModel):
     sea: bool = False
     warm: bool = False
@@ -52,6 +95,9 @@ class TravelSlots(BaseModel):
     travelers: Travelers = Field(default_factory=Travelers)
     transport: Transport = Field(default_factory=Transport)
     preferences: Preferences = Field(default_factory=Preferences)
+    missing_fields: list[str] = Field(default_factory=list)
+    clarifying_question: Optional[str] = None
+    ready_to_search: bool = False
 
     def merge(self, other: "TravelSlots") -> "TravelSlots":
         data = self.model_dump()

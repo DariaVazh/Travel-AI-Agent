@@ -9,7 +9,7 @@ from .llm_config import (
     OPENROUTER_BASE_URL,
     OPENROUTER_MODEL,
 )
-from slots_schema import TravelSlots
+from .slots_schema import TravelSlots
 
 def get_client() -> OpenAI:
     return OpenAI(
@@ -24,7 +24,11 @@ def get_client() -> OpenAI:
 SYSTEM_EXTRACT = f"""Ты — модуль анализа намерений. Выдели слоты из сообщения пользователя.
 Ответ ДОЛЖЕН быть строго в формате JSON, соответствующем этой Pydantic-схеме:
 {json.dumps(TravelSlots.model_json_schema(), ensure_ascii=False, indent=2)}
-Если какое-то поле неизвестно, ставь null или значения по умолчанию.
+
+Важные правила:
+1. Даты должны быть в формате YYYY-MM-DD и не должны быть раньше сегодняшнего дня.
+2. Массив transport.modes может содержать ТОЛЬКО значения: "plane", "train", "any".
+3. Если какое-то поле неизвестно, ставь null или значение по умолчанию.
 """
 
 SYSTEM_REPLY = """Ты — дружелюбный travel-агент. Твоя задача — очеловечивать готовые данные маршрутов, переданные из API (в JSON), и отвечать с эмодзи.
@@ -56,7 +60,6 @@ def extract_slots(user_text: str, previous_slots: dict | None = None) -> dict:
             response_format={"type": "json_object"}
         )
         data = parse_json(resp.choices[0].message.content or "{}")
-        # Пункт 5: Перехват ValidationError
         validated = TravelSlots.model_validate(data)
         return validated.model_dump()
     except (ValidationError, json.JSONDecodeError, RateLimitError, APIError) as e:

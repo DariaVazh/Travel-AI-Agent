@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from slots_schema import TravelSlots
+from .slots_schema import TravelSlots
 
 load_dotenv()
 
@@ -19,9 +19,11 @@ def slots_to_query(slots: TravelSlots) -> dict:
     total = (slots.travelers.adults or 1) + (slots.travelers.children or 0) + (slots.travelers.infants or 0)
     modes = slots.transport.modes or ["any"]
     transport = "any" if "any" in modes else modes[0]
+
     budget = None
     if slots.budget.amount is not None:
         budget = slots.budget.amount * total if slots.budget.per_person else slots.budget.amount
+
     return {
         "origin": slots.origin,
         "destination": slots.destination,

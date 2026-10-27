@@ -1,0 +1,3 @@
+SQLAlchemy[asyncio]==2.0.40
+asyncpg==0.30.0
+python-dotenv==1.1.0

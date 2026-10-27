@@ -1,11 +1,12 @@
 import json
 
+
 def _ensure_json(obj):
     json.dumps(obj, ensure_ascii=False)
     return obj
 
 
-def _norm_leg(o, guests):
+def _norm_leg(o):
     if not o:
         return None
     return {
@@ -15,9 +16,11 @@ def _norm_leg(o, guests):
         "destination": o.get("destination"),
         "depart": o.get("depart"),
         "arrive": o.get("arrive"),
+        "arrival_station": o.get("arrival_station"),
         "duration_min": o.get("duration_min"),
         "transfers": o.get("transfers", 0),
         "price_per_person": o.get("price"),
+        "price_estimated": bool(o.get("price_estimated")),
         "currency": o.get("currency", "RUB"),
         "source": o.get("source"),
         "is_mock": bool(o.get("is_mock")),
@@ -29,7 +32,8 @@ def _norm_hotel(h):
         return None
     return {
         "name": h.get("name"),
-        "stars": h.get("stars"),
+        "address": h.get("address"),
+        "stars": h.get("stars") or None,
         "rating": h.get("rating"),
         "rating_real": bool(h.get("rating_real")),
         "reviews": h.get("reviews"),
@@ -37,7 +41,7 @@ def _norm_hotel(h):
         "price_per_night": h.get("price_per_night"),
         "nights": h.get("nights"),
         "rooms": h.get("rooms", 1),
-        "meal": h.get("meal"),
+        "meal": h.get("meal"),                        # RO без питания, BB завтрак, HB полупансион, AI всё включено
         "pets_allowed": h.get("pets_allowed"),
         "free_cancellation": h.get("free_cancellation"),
         "distance_center_km": h.get("distance_center_km"),
@@ -58,9 +62,14 @@ def _norm_transfer(t):
         "duration_min": t.get("duration_min"),
         "distance_km": t.get("distance_km"),
         "price": t.get("price_estimate"),
+        "price_estimated": True,
         "currency": "RUB",
         "source": t.get("source"),
     }
+
+
+def _part(x):
+    return None if not x else {"score": x.get("score"), "why": x.get("why", []), "cautions": x.get("cautions", [])}
 
 
 def _norm_attractiveness(a):
@@ -68,7 +77,10 @@ def _norm_attractiveness(a):
         return None
     return {
         "score": a.get("score"),
+        "label": a.get("label"),
         "confidence": a.get("confidence"),
+        "hotel": _part(a.get("hotel")),
+        "route": _part(a.get("route")),
     }
 
 
@@ -78,6 +90,9 @@ def _norm_package(p, q):
     total = p.get("total_price") or 0
     return {
         "id": p["id"],
+        "labels": p.get("labels", []),
+        "why": p.get("why", []),                      # почему подходит (для объяснения пользователю)
+        "tradeoffs": p.get("tradeoffs", []),          # чем пришлось пожертвовать
         "totals": {
             "transport": p.get("transport_total"),
             "hotel": (p.get("hotel") or {}).get("total_price"),
@@ -88,8 +103,8 @@ def _norm_package(p, q):
             "budget": budget,
             "over_budget_by": max(0, int(total - budget)) if budget else 0,
         },
-        "outbound": _norm_leg(p.get("outbound"), q.get("guests", 1)),
-        "return": _norm_leg(p.get("return"), q.get("guests", 1)),
+        "outbound": _norm_leg(p.get("outbound")),
+        "return": _norm_leg(p.get("return")),
         "hotel": _norm_hotel(p.get("hotel")),
         "transfer": _norm_transfer(p.get("transfer")),
         "attractiveness": _norm_attractiveness(p.get("attractiveness")),
@@ -103,8 +118,22 @@ def to_api(result):
         "query": result.get("query"),
         "weather": result.get("weather"),
         "packages": [_norm_package(p, result.get("query")) for p in result.get("packages", [])],
+        "buttons": result.get("buttons", []),
+        "disclaimer": result.get("disclaimer"),        # обязателен к показу пользователю
+        "data_sources": result.get("data_sources"),    # что реальное, что оценка
+        "fallback_text": result.get("text"),           # готовый текст, если LLM не нужно ничего писать самой
     }
-    for k in ("reason", "suggestions", "errors", "missing", "unknown_cities", "unsupported_cities"):
+    for k in ("reason", "suggestions", "errors", "missing", "unknown_cities", "unsupported_cities", "replan"):
+        if k in result:
+            out[k] = result[k]
+    return _ensure_json(out)
+
+
+def to_api_compare(result):
+    """Результат compare_destinations: rows (по городу: цена, дорога, погода) или need_info."""
+    out = {k: result.get(k) for k in ("status", "rows", "disclaimer")}
+    out["fallback_text"] = result.get("text")
+    for k in ("missing", "errors", "unknown_cities", "unsupported_cities"):
         if k in result:
             out[k] = result[k]
     return _ensure_json(out)
@@ -130,6 +159,7 @@ def to_api_cart(cart):
         "guests": cart["guests"],
         "matches_package_total": cart["matches_package_total"],
         "requirements": cart["requirements"],
+        "disclaimer": cart.get("disclaimer"),
     })
 
 

@@ -11,6 +11,28 @@ from app.output import to_api
 
 COVERAGE_CITIES = ["Сочи", "Москва", "Санкт-Петербург", "Казань", "Калининград"]
 
+# Словарь: техническое поле -> (человеческая фраза, уточняющий вопрос)
+FIELD_HUMAN = {
+    "origin": ("город отправления", "Откуда вы планируете выезжать?"),
+    "destination": ("направление", "Куда хотите поехать? Или подсказать варианты?"),
+    "destination_flexible": ("гибкость по направлению", "Готовы рассмотреть любые направления?"),
+    "dates": ("даты поездки", "Когда планируете поездку? Хотя бы месяц."),
+    "date_from": ("дата начала", "Когда планируете выезжать?"),
+    "date_to": ("дата окончания", "Насколько дней едете?"),
+    "dates.date_from": ("дата начала", "Когда планируете выезжать?"),
+    "dates.date_to": ("дата окончания", "Насколько дней едете?"),
+    "dates.month": ("месяц поездки", "В каком месяце хотите поехать?"),
+    "budget": ("бюджет", "Какой бюджет закладываете на поездку?"),
+    "budget.amount": ("сумма бюджета", "Какой бюджет закладываете на поездку?"),
+    "travelers": ("путешественники", "Сколько человек едет и с кем?"),
+    "travelers.adults": ("взрослые", "Сколько взрослых едет?"),
+    "travelers.children": ("дети", "Сколько детей едет? Укажите возраст, если есть."),
+    "transport": ("транспорт", "Как предпочитаете добираться — самолёт, поезд или без разницы?"),
+    "transport.modes": ("вид транспорта", "Как предпочитаете добираться — самолёт, поезд или без разницы?"),
+    "preferences": ("предпочтения", "Что важно в поездке — море, тепло, звёзды отеля?"),
+    "preferences.hotel_stars_min": ("звёздность отеля", "Какой минимальный уровень отеля рассматриваете?"),
+}
+
 class TravelAgent:
     def __init__(self, user_id: str = "default"):
         self.slots = TravelSlots()
@@ -94,13 +116,47 @@ class TravelAgent:
 
         # Обработка нехватки данных (missing / errors)
         if self.raw_res.get("missing") or self.raw_res.get("errors"):
-            missing_fields = ", ".join(self.raw_res.get("missing", []))
-            err_msg = ", ".join(self.raw_res.get("errors", []))
-            msg = "Пожалуйста, уточните следующие данные:"
-            if missing_fields:
-                msg += f"\n- Обязательные поля: {missing_fields}"
-            if err_msg:
-                msg += f"\n- Ошибки: {err_msg}"
+            raw_missing = self.raw_res.get("missing", [])
+            raw_errors = self.raw_res.get("errors", [])
+
+            # 1) Собираем человеческие фразы и вопросы
+            human_hints = []
+            questions = []
+            seen = set()
+            for field in raw_missing:
+                if field in seen:
+                    continue
+                seen.add(field)
+                human, question = FIELD_HUMAN.get(
+                    field,
+                    (field.replace("_", " "), None),
+                )
+                human_hints.append(human)
+                if question:
+                    questions.append(question)
+
+            # 2) Формируем дружелюбное сообщение
+            if human_hints:
+                if len(human_hints) == 1:
+                    header = f"Почти всё готово! Подскажите ещё {human_hints[0]} 🙏"
+                else:
+                    header = "Чтобы подобрать маршрут, мне не хватает пары деталей:"
+            else:
+                header = "Мне нужно чуть больше информации, чтобы подобрать вариант."
+
+            # 3) Если есть «человеческие» вопросы — задаём их, иначе показываем фразы списком
+            if questions:
+                bullets = "\n".join(f"• {q}" for q in questions)
+            else:
+                bullets = "\n".join(f"• {h}" for h in human_hints)
+
+            msg = f"{header}\n{bullets}"
+
+            # 4) Ошибки (валидация) — мягко, отдельным блоком
+            if raw_errors:
+                msg += "\n\nЗаметил небольшую загвоздку:"
+                msg += "\n" + "\n".join(f"• {e}" for e in raw_errors)
+
             return {"text": msg, "buttons": []}
 
         # Обработка отсутствия результатов (no_results -> suggestions)

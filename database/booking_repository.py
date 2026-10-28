@@ -1,8 +1,8 @@
 from datetime import date
 from decimal import Decimal
 from sqlalchemy import select
-from connection import AsyncSessionLocal
-from models import Booking
+from .connection import AsyncSessionLocal
+from .models import Booking
 
 
 async def create_demo_booking(user_id: int, query: dict, package: dict) -> int:

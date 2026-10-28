@@ -1,7 +1,7 @@
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.dialects.postgresql import insert
-from connection import AsyncSessionLocal
-from models import User
+from .connection import AsyncSessionLocal
+from .models import User
 
 
 async def get_or_create_user(telegram_id: int, name: str,) -> int:
@@ -76,3 +76,52 @@ def merge_dicts(old: dict, new: dict) -> dict:
             result[key] = value
 
     return result
+
+
+async def save_user_phone(
+    telegram_id: int,
+    phone_number: str
+) -> None:
+
+    phone_number = phone_number.strip()
+
+    if not phone_number or len(phone_number) > 32:
+        raise ValueError("Некорректный номер телефона")
+
+    async with AsyncSessionLocal.begin() as session:
+        stmt = (
+            update(User)
+            .where(User.telegram_id == telegram_id)
+            .values(
+                phone_number=phone_number,
+                updated_at=func.now()
+            )
+            .returning(User.id)
+        )
+
+        user_id = await session.scalar(stmt)
+
+        if user_id is None:
+            raise ValueError("Пользователь не найден")
+
+
+async def get_user_profile(
+    telegram_id: int
+) -> dict | None:
+
+    async with AsyncSessionLocal() as session:
+        stmt = select(User).where(
+            User.telegram_id == telegram_id
+        )
+
+        user = await session.scalar(stmt)
+
+        if user is None:
+            return None
+
+        return {
+            "id": user.id,
+            "telegram_id": user.telegram_id,
+            "full_name": user.name,
+            "phone_number": user.phone_number
+        }

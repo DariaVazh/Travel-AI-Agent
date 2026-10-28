@@ -147,6 +147,9 @@ async def start(message: Message, state: FSMContext):
 
 @router.message(F.text == "Найти поездку")
 async def find_trip(message: Message, state: FSMContext):
+    if not await require_registration(message, state):
+        return
+
     await message.answer(
         "Слушаю вас! Опишите поездку 👇",
         reply_markup=ReplyKeyboardRemove())

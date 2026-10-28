@@ -98,7 +98,7 @@ docker compose ps
 Логи Telegram-бота:
 
 ```bash
-docker compose logs -f bot
+docker compose logs -f botD
 ```
 
 Логи backend:

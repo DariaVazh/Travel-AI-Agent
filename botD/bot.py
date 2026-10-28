@@ -7,7 +7,7 @@ import re
 from copy import deepcopy
 from pathlib import Path
 from dotenv import load_dotenv
-from aiogram import Bot, Dispatcher, F, Router, html
+from aiogram import Bot, Dispatcher, F, Router, html, BaseMiddleware
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -28,6 +28,8 @@ from database.booking_repository import (
     create_demo_booking,
     get_user_bookings, get_booking,
 )
+from time import monotonic
+from contextlib import suppress
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -35,6 +37,30 @@ logging.basicConfig(level=logging.INFO)
 router = Router()
 user_agents = {}
 _memory_locks: dict[int, asyncio.Lock] = {}
+MEMORY_IDLE_SECONDS = 3 * 60
+MEMORY_RETRY_SECONDS = 60
+
+_last_activity: dict[int, float] = {}
+_busy_users: dict[int, int] = {}
+_memory_retry_after: dict[int, float] = {}
+
+
+class ActivityMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user = getattr(event, "from_user", None)
+        if user is None:
+            return await handler(event, data)
+
+        user_id = user.id
+        _last_activity[user_id] = monotonic()
+        _busy_users[user_id] = _busy_users.get(user_id, 0) + 1
+
+        try:
+            return await handler(event, data)
+        finally:
+            _busy_users[user_id] -= 1
+            # Отсчитываем тишину после завершения обработки.
+            _last_activity[user_id] = monotonic()
 
 
 class Flow(StatesGroup):
@@ -60,9 +86,20 @@ def get_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Найти поездку")],
-            [KeyboardButton(text="Отправить контакт", request_contact=True), KeyboardButton(text="Мои брони")]
+            [KeyboardButton(text="Начать сначала"), KeyboardButton(text="Мои брони")]
         ],
         resize_keyboard=True, one_time_keyboard=False,
+    )
+
+
+def get_search_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Начать сначала")],
+            [KeyboardButton(text="Мои брони")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=False,
     )
 
 
@@ -157,7 +194,7 @@ async def find_trip(message: Message, state: FSMContext):
 
     await message.answer(
         "Слушаю вас! Опишите поездку 👇",
-        reply_markup=ReplyKeyboardRemove())
+        reply_markup=get_search_keyboard())
     await state.set_state(Flow.chatting)
 
 
@@ -489,7 +526,7 @@ async def process_more(message: Message, state: FSMContext):
         return
     await message.answer(
         "Напишите, что именно хотите изменить (например: найди варианты дешевле).",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=get_search_keyboard(),
     )
     await state.set_state(Flow.chatting)
 
@@ -519,7 +556,7 @@ async def process_restart(message: Message, state: FSMContext):
     await state.set_state(Flow.chatting)
     await message.answer(
         "Давайте начнём сначала! Куда хотите отправиться?",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=get_search_keyboard(),
     )
 
 
@@ -622,12 +659,85 @@ async def handle_chat(message: Message, state: FSMContext):
         await message.answer(f"Ошибка: {e}")
 
 
+async def memory_autosave_loop():
+    while True:
+        await asyncio.sleep(60)
+
+        for user_id, agent in list(user_agents.items()):
+            last_activity = _last_activity.get(user_id)
+            if last_activity is None:
+                continue
+
+            now = monotonic()
+
+            if _busy_users.get(user_id, 0):
+                continue
+
+            if now - last_activity < MEMORY_IDLE_SECONDS:
+                continue
+
+            if now < _memory_retry_after.get(user_id, 0):
+                continue
+
+            if agent.memory_saved_upto >= len(agent.chat_history):
+                continue
+
+            lock = _memory_locks.setdefault(user_id, asyncio.Lock())
+
+            if lock.locked():
+                continue
+
+            try:
+                async with lock:
+                    # Пока обходили пользователей, сессия могла смениться.
+                    if user_agents.get(user_id) is not agent:
+                        continue
+
+                    if _busy_users.get(user_id, 0):
+                        continue
+
+                    if (
+                        monotonic() - _last_activity[user_id]
+                        < MEMORY_IDLE_SECONDS
+                    ):
+                        continue
+
+                    await asyncio.wait_for(
+                        checkpoint_memory(agent, user_id),
+                        timeout=90,
+                    )
+
+                _memory_retry_after.pop(user_id, None)
+
+            except Exception:
+                logging.exception(
+                    "Не удалось автоматически сохранить память: user_id=%s",
+                    user_id,
+                )
+                _memory_retry_after[user_id] = (
+                    monotonic() + MEMORY_RETRY_SECONDS
+                )
+
+
 async def main():
     bot = Bot(token=os.getenv("BOT_TOKEN"))
     dp = Dispatcher(storage=MemoryStorage())
+
+    activity = ActivityMiddleware()
+    router.message.outer_middleware(activity)
+    router.callback_query.outer_middleware(activity)
+
     dp.include_router(router)
-    print("Бот запущен.")
-    await dp.start_polling(bot)
+
+    memory_task = asyncio.create_task(memory_autosave_loop())
+
+    try:
+        print("Бот запущен.")
+        await dp.start_polling(bot)
+    finally:
+        memory_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await memory_task
 
 
 if __name__ == "__main__":

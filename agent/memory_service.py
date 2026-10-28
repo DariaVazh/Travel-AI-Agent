@@ -3,9 +3,8 @@ from database.user_repository import (
     update_user_memory
 )
 import json
-
+from copy import deepcopy
 from openai import AsyncOpenAI
-
 from .memory_schema import LongTermMemory
 from .llm_config import (
     OPENROUTER_API_KEY,
@@ -153,9 +152,9 @@ async def extract_memory_changes(
 async def checkpoint_memory(agent, telegram_id: int) -> None:
     end_index = len(agent.chat_history)
 
-    messages = agent.chat_history[
-        agent.memory_saved_upto:end_index
-    ]
+    messages = deepcopy(
+        agent.chat_history[agent.memory_saved_upto:end_index]
+    )
 
     if not messages:
         return
@@ -168,6 +167,11 @@ async def checkpoint_memory(agent, telegram_id: int) -> None:
         messages=messages,
         old_memory=old_memory
     )
+
+    if not isinstance(changes, dict):
+        raise RuntimeError(
+            "extract_memory_changes должна возвращать словарь изменений"
+        )
 
     if changes:
         await update_user_memory(

@@ -1,8 +1,8 @@
 import sqlite3
 import json
 
-# DB_PATH = "bot.db"
-DB_PATH = "/app/data/bot.db"
+# DB_PATH = "botD.db"
+DB_PATH = "/app/data/botD.db"
 
 def init_db():
     with sqlite3.connect(DB_PATH) as conn:

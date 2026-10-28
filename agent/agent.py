@@ -5,7 +5,7 @@ from .llm import extract_slots, reply_to_user
 from .llm_config import slots_to_query
 from .storage import save_route, list_routes
 
-from app.planner import plan_trip, replan, compare_destinations
+from app.search import plan_trip, replan, compare_destinations
 from app.cart import build_cart, mock_checkout
 from app.output import to_api
 

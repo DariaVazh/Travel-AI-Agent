@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 import requests
 
-import cities
+from app import cities
 
 
 def _warn(where, err):

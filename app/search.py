@@ -11,13 +11,13 @@ import hashlib
 import math
 import time
 
-from attractiveness import package_attractiveness
-from cities import COVERAGE_NOTE, get_city, is_unsupported
-from providers import HOTEL_PROVIDERS, TRANSPORT_PROVIDERS
-from ranking import check_compat, rank_hotels, rank_transport
-from schema import DEFAULTS, normalize_query
-from transfer import get_transfer
-from weather import get_weather, weather_text
+from app.attractiveness import package_attractiveness
+from app.cities import COVERAGE_NOTE, get_city, is_unsupported
+from app.providers import HOTEL_PROVIDERS, TRANSPORT_PROVIDERS
+from app.ranking import check_compat, rank_hotels, rank_transport
+from app.schema import DEFAULTS, normalize_query
+from app.transfer import get_transfer
+from app.weather import get_weather, weather_text
 
 DISCLAIMER = ("Источники: Travelpayouts (кэш Aviasales), Яндекс.Расписания, 2GIS, Open-Meteo. "
               "Оценочные поля перечислены в data_sources.estimated.")

@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import requests
-from config import get_secret
+from app.config import get_secret
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 

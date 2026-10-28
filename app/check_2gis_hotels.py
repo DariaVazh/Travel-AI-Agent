@@ -5,8 +5,8 @@
 import json
 import re
 
-import twogis
-from cities import get_city
+from app import twogis
+from app.cities import get_city
 
 if not twogis.KEY:
     raise SystemExit("Ключ 2GIS не найден: проверьте TWOGIS_API_KEY в .env")

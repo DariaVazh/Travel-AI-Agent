@@ -1,3 +1,4 @@
+aiogram==3.13.1
 fastapi==0.115.12
 uvicorn==0.34.2
 certifi==2026.10.23
@@ -17,4 +18,4 @@ urllib3-future==2.25.903
 wassima==2.1.5
 openai>=1.0.0
 pydantic>=2.0.0
-python-dotenv>=1.0.0
+python-dotenv==1.0.1

@@ -2,8 +2,8 @@
 import time
 from datetime import date, timedelta
 
-from cart import build_cart, mock_checkout
-from search import plan_trip, replan
+from app.cart import build_cart, mock_checkout
+from app.search import plan_trip, replan
 
 d = lambda n: (date.today() + timedelta(days=n)).isoformat()
 base = {"origin": "Москва", "destination": "Сочи", "date_from": d(30), "date_to": d(37)}

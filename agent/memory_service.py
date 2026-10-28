@@ -1,4 +1,3 @@
-
 from database.user_repository import (
     get_user_memory,
     update_user_memory
@@ -28,7 +27,6 @@ async def checkpoint_memory(agent, telegram_id: int) -> None:
         old_memory=old_memory
     )
 
-    # Здесь ещё нужна проверка JSON по схеме памяти
     if changes:
         await update_user_memory(
             telegram_id=telegram_id,

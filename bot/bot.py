@@ -13,7 +13,7 @@ from aiogram.types import (
 )
 from agent.agent import TravelAgent
 from agent import storage
-from bot.memory_service import checkpoint_memory
+from agent.memory_service import checkpoint_memory
 from database.user_repository import (
     get_or_create_user,
     get_user_profile,

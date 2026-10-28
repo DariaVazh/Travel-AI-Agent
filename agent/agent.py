@@ -119,8 +119,8 @@ class TravelAgent:
             user_text,
             {
                 "api_data": api_out,
-                "history": self.chat_history[-5:],
-                "memory": self.long_term_memory
+                "history": self.chat_history[-5:]
+                # "memory": self.long_term_memory
             }
         )
         self.chat_history.append({"role": "assistant", "content": human_text})

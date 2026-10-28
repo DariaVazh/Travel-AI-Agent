@@ -23,6 +23,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY app/ ./app/
 COPY agent/ ./agent/
 COPY botD/ ./botD/
+COPY database/ ./database/
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser

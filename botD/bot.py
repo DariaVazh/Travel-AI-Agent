@@ -470,23 +470,11 @@ async def process_payment(message: Message, state: FSMContext):
             f"Итого: {html.quote(str(package['total_price']))} ₽\n"
             f"Гость: {html.quote(full_name)}\n\n"
             f"Ваучер отправлен на почту (демо). Спасибо, что выбрали нас!",
-            reply_markup=ReplyKeyboardRemove(),
+            reply_markup=get_main_menu(),
             parse_mode="HTML"
         )
     else:
         await message.answer(f"Ошибка при оплате: не хватает данных ({result.get('missing')})")
-
-    # except Exception as e:
-    #     logging.error(f"Ошибка при имитации оплаты: {e}")
-    #     booking_id = "MOCK-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-    #     await message.answer(
-    #         f"✅ <b>Бронь оформлена (упрощенная демо)!</b>\n\n"
-    #         f"Номер: <code>{html.quote(booking_id)}</code>\n"
-    #         f"Гость: {html.quote(full_name)}",
-    #         reply_markup=ReplyKeyboardRemove(),
-    #         parse_mode="HTML"
-    #     )
-    # await state.clear()
 
 
 @router.message(Flow.waiting_payment, F.text == "Отмена")

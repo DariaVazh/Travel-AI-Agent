@@ -21,13 +21,10 @@ services:
     command: ["python", "-m", "botD.bot"]
     env_file:
       - .env
-    volumes:
-      - bot_data:/app/data
+
     depends_on:
       app:
         condition: service_healthy
 
-volumes:
-  bot_data:
 
 

@@ -19,3 +19,6 @@ wassima==2.1.5
 openai>=1.0.0
 pydantic>=2.0.0
 python-dotenv==1.0.1
+SQLAlchemy[asyncio]==2.0.40
+asyncpg==0.30.0
+alembic==1.20.1

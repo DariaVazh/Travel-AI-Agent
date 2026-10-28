@@ -328,15 +328,25 @@ def replan(query, changes, selected=None, keep=("outbound", "return", "hotel")):
 
 
 def compare_destinations(raw, cities, top=5):
-    """Для вдохновения: сравнивает города-кандидаты (их предлагает LLM) по реальным данным:
-    самый дешёвый пакет, время в пути, погода. raw - запрос БЕЗ destination."""
+    """Для вдохновения: сравнивает города-кандидаты по реальным данным.
+    raw - запрос БЕЗ destination."""
     rows = []
+    origin = str((raw or {}).get("origin") or "").strip().lower()
+
     for c in cities:
+        # Пропускаем город, который совпадает с origin
+        if str(c).strip().lower() == origin:
+            continue
+
         res = plan_trip({**raw, "destination": c})
         if res["status"] == "need_info":
             if res.get("unknown_cities"):
                 rows.append({"city": c, "status": "unsupported_city" if res.get("unsupported_cities")
                              else "unknown_city"})
+                continue
+            # Если единственная ошибка — "origin и destination совпадают", просто пропускаем город
+            errors = res.get("errors") or []
+            if errors == ["origin и destination совпадают"]:
                 continue
             return res
         if res["status"] != "ok":
@@ -348,6 +358,7 @@ def compare_destinations(raw, cities, top=5):
                      "total_price": best["total_price"], "within_budget": best["within_budget"],
                      "travel_min": best["outbound"]["duration_min"], "mode": best["outbound"]["mode"],
                      "weather": res["weather"], "package_id": best["id"]})
+
     rows.sort(key=lambda r: (r["status"] != "ok", not r.get("within_budget", False), r.get("total_price", 0)))
     rows = rows[:top]
     lines = []
@@ -362,7 +373,6 @@ def compare_destinations(raw, cities, top=5):
         lines.append(f"{i}. {r['city']}: от {int(r['total_price'])} ₽, дорога {r['travel_min'] // 60} ч "
                      f"{r['travel_min'] % 60} мин{temp}" + ("" if r["within_budget"] else " (выше бюджета)"))
     return {"status": "ok", "rows": rows, "text": "\n".join(lines), "disclaimer": DISCLAIMER}
-
 
 # ───────────────────────── текст для чата ─────────────────────────
 def _tag(x):

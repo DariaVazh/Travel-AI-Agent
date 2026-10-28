@@ -9,6 +9,9 @@ from app.search import plan_trip, replan, compare_destinations
 from app.cart import build_cart, mock_checkout
 from app.output import to_api
 
+from datetime import date
+today = date.today()
+
 COVERAGE_CITIES = ["Сочи", "Москва", "Санкт-Петербург", "Казань", "Калининград"]
 
 # Словарь: техническое поле -> (человеческая фраза, уточняющий вопрос)
@@ -32,6 +35,7 @@ FIELD_HUMAN = {
     "preferences": ("предпочтения", "Что важно в поездке — море, тепло, звёзды отеля?"),
     "preferences.hotel_stars_min": ("звёздность отеля", "Какой минимальный уровень отеля рассматриваете?"),
 }
+
 
 class TravelAgent:
     def __init__(self, user_id: str = "default"):
@@ -85,7 +89,9 @@ class TravelAgent:
                         break
 
             if selected_package:
-                query_data = self.raw_res.get("query", text)
+                query_data = self.raw_res.get("query")
+                if not isinstance(query_data, dict):
+                    query_data = slots_to_query(self.slots)
                 self.active_cart = build_cart(selected_package, query_data)
                 self.booking_state = "awaiting_checkout_info"
                 return {
@@ -94,20 +100,90 @@ class TravelAgent:
                 }
             return {"text": "Не удалось найти выбранный пакет для демо-брони.", "buttons": []}
 
-        # --- Запрос «куда поехать» ---
-        if "куда поехать" in text_l or "предложи направления" in text_l:
-            res_comp = compare_destinations(text, COVERAGE_CITIES, self.slots)
+        # --- Запрос «куда поехать» / «предложи направления» ---
+        # --- Запрос «куда поехать» / «предложи направления» ---
+        # --- Запрос «куда поехать» / «предложи направления» ---
+        if (
+                "куда поехать" in text_l
+                or "предложи направления" in text_l
+                or "предложи варианты" in text_l
+                or "какие направления" in text_l
+                or "подскажи варианты" in text_l
+        ):
+            # Пользователь хочет предложения → destination должен быть пустым
+            self.slots.destination = None
+            self.slots.destination_flexible = True
+
+            query = slots_to_query(self.slots)
+            query["destination"] = None  # обязательно
+
+            # Правильный вызов: только query и список городов
+            res_comp = compare_destinations(query, COVERAGE_CITIES)
             self.raw_res = res_comp
-            api_out = to_api(res_comp)
+
+            # Если функция вернула need_info / errors
+            if res_comp.get("missing") or res_comp.get("errors") or res_comp.get("status") == "need_info":
+                raw_missing = res_comp.get("missing", [])
+                raw_errors = res_comp.get("errors", [])
+
+                human_hints = []
+                questions = []
+                seen = set()
+                for field in raw_missing:
+                    if field in seen:
+                        continue
+                    seen.add(field)
+                    human, question = FIELD_HUMAN.get(field, (field.replace("_", " "), None))
+                    human_hints.append(human)
+                    if question:
+                        questions.append(question)
+
+                if human_hints:
+                    header = (f"Почти всё готово! Подскажите ещё {human_hints[0]} 🙏"
+                              if len(human_hints) == 1
+                              else "Чтобы предложить направления, мне нужно чуть больше информации:")
+                else:
+                    header = "Мне нужно чуть больше информации, чтобы предложить варианты."
+
+                bullets = "\n".join(f"• {q}" for q in questions) if questions else "\n".join(
+                    f"• {h}" for h in human_hints)
+                msg = f"{header}\n{bullets}"
+
+                if raw_errors:
+                    msg += "\n\nЗаметил небольшую загвоздку:\n" + "\n".join(f"• {e}" for e in raw_errors)
+
+                return {"text": msg, "buttons": []}
+
+            # Успешный ответ
+            api_out = to_api(res_comp) if "to_api" in globals() else res_comp
+            text = api_out.get("text") or res_comp.get("text") or "Вот доступные направления для отдыха:"
             return {
-                "text": api_out.get("text", "Вот доступные направления для отдыха:"),
+                "text": text,
                 "buttons": api_out.get("buttons", [])
             }
 
         # --- Извлечение слотов, адаптер, поиск через plan_trip ---
         raw_slots = extract_slots(user_text, self.slots.model_dump())
+        print("\n=== DEBUG extract_slots ===")
+        print("raw_slots:", raw_slots)
+        print("===========================\n")
+
         if raw_slots:
             self.slots = TravelSlots.model_validate(raw_slots)
+            if self.slots.dates.month and not self.slots.dates.date_from:
+                try:
+                    month = int(self.slots.dates.month)
+                    year = today.year
+                    # если месяц уже прошёл — берём следующий год
+                    if month < today.month or (month == today.month and today.day > 28):
+                        year += 1
+                    self.slots.dates.date_from = f"{year}-{month:02d}-01"
+                except Exception:
+                    pass
+
+        print("=== DEBUG current slots ===")
+        print(self.slots.model_dump())
+        print("===========================\n")
 
         query = slots_to_query(self.slots)
 
@@ -187,7 +263,5 @@ class TravelAgent:
         }
 
     def handle(self, user_text: str) -> dict:
-        return asyncio.run(asyncio.to_thread(self._handle_sync, user_text))
-
-    def _handle_sync(self, user_text: str) -> dict:
+        """Синхронная обёртка. Без вложенных asyncio.run."""
         return asyncio.run(self.handle_async(user_text))

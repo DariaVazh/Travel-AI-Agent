@@ -4,6 +4,7 @@ import logging
 import random
 import string
 import re
+from copy import deepcopy
 from pathlib import Path
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, Router, html
@@ -22,6 +23,10 @@ from database.user_repository import (
     get_or_create_user,
     get_user_profile,
     save_user_phone, get_user_memory
+)
+from database.booking_repository import (
+    create_demo_booking,
+    get_user_bookings, get_booking,
 )
 
 load_dotenv()
@@ -183,29 +188,78 @@ async def on_contact(message: Message, state: FSMContext):
     await state.set_state(Flow.chatting)
 
 
+
 @router.message(F.text == "Мои брони")
 async def show_bookings(message: Message, state: FSMContext):
-    if not await require_registration(message, state):
+
+    user = await require_registration(message, state)
+    if user is None:
         return
 
-    routes = storage.list_routes(user_id=str(message.from_user.id))
+    bookings = await get_user_bookings(user["id"])
 
-    if not routes:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Найти поездку")]],
-            resize_keyboard=True
+    if not bookings:
+        await message.answer(
+            "У вас пока нет сохранённых броней.",
+            reply_markup=get_main_menu()
         )
-        await message.answer("У вас пока нет сохраненных броней. Хотите найти поездку?", reply_markup=kb)
         return
 
-    text = "📋 <b>Ваши последние брони:</b>\n\n"
-    for r in routes[-3:]:
-        pkg = r.get("package") or {}
-        b_id = pkg.get("booking_id", "Без номера")
-        saved_at = r.get("saved_at", "")[:10]
-        text += f"🔖 <code>{html.quote(b_id)}</code> (от {saved_at})\n"
+    keyboard = []
 
-    await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
+    for booking in bookings:
+        keyboard.append([
+            InlineKeyboardButton(
+                text=f"№{booking['id']} — {booking['hotel_name']}",
+                callback_data=f"booking:{booking['id']}"
+            )
+        ])
+
+    await message.answer(
+        "📋 Ваши бронирования:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=keyboard
+        )
+    )
+
+
+@router.callback_query(F.data.startswith("booking:"))
+async def show_booking_details(callback: CallbackQuery):
+
+    await callback.answer()
+
+    user = await get_user_profile(callback.from_user.id)
+
+    if user is None:
+        await callback.message.answer("Пользователь не найден.")
+        return
+
+    booking_id = int(callback.data.split(":")[1])
+
+    booking = await get_booking(
+        user_id=user["id"],
+        booking_id=booking_id
+    )
+
+    if booking is None:
+        await callback.message.answer(
+            "Бронирование не найдено."
+        )
+        return
+
+    text = (
+        f"🏨 Бронирование №{booking['id']}\n\n"
+        f"Отель: {booking['hotel_name']}\n"
+        f"Город: {booking['destination']}\n"
+        f"Заезд: {booking['check_in']}\n"
+        f"Выезд: {booking['check_out']}\n"
+        f"Стоимость: {booking['total_price']} "
+        f"{booking['currency']}\n"
+        f"Статус: {booking['status']}"
+    )
+
+    await callback.message.answer(text)
+
 
 
 @router.callback_query(F.data.startswith("pick:"))
@@ -217,19 +271,62 @@ async def process_pick(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("Пожалуйста, начните с команды /start")
         return
 
-    text = callback.data
-    response = await agent.handle_async(text)
-    answer_text = response.get("text", "")
+    package_id = callback.data.removeprefix("pick:")
+    result = agent.raw_res or {}
 
-    answer_text = clean_markdown(answer_text)
+    package = next(
+        (
+            item for item in result.get("packages", [])
+            if item["id"] == package_id
+        ),
+        None,
+    )
+    query = result.get("query")
 
-    await callback.message.answer(answer_text, parse_mode="HTML")
-    await state.set_state(Flow.waiting_payment)
+    if package is None or not isinstance(query, dict):
+        await callback.message.answer(
+            "Этот вариант больше недоступен. Повторите поиск."
+        )
+        return
+
+    if not package.get("hotel") or not query.get("date_to"):
+        await callback.message.answer(
+            "Для бронирования проживания нужны отель и дата выезда."
+        )
+        return
+
+    await state.update_data(
+        selected_package=deepcopy(package),
+        selected_query=deepcopy(query),
+    )
+
+    # text = callback.data
+    # response = await agent.handle_async(text)
+    # answer_text = response.get("text", "")
+    #
+    # answer_text = clean_markdown(answer_text)
+    # await callback.message.answer(answer_text, parse_mode="HTML")
+
+    await callback.message.answer(
+        "Нажмите «Забронировать», чтобы продолжить.",
+        reply_markup=get_chat_keyboard()
+    )
+
+    await state.set_state(Flow.choosing_hotel)
 
 
 @router.message(Flow.choosing_hotel, F.text == "Забронировать")
 async def start_booking(message: Message, state: FSMContext):
     if not await require_registration(message, state):
+        return
+
+    data = await state.get_data()
+
+    if (
+            data.get("selected_package") is None
+            or data.get("selected_query") is None
+    ):
+        await message.answer("Сначала выберите вариант поездки.")
         return
 
     await state.update_data(hotel_name="Выбранный отель")
@@ -324,62 +421,72 @@ async def process_payment(message: Message, state: FSMContext):
     full_name = data.get("full_name") or (user or {}).get("full_name")
     phone = data.get("phone") or (user or {}).get("phone_number")
 
-    try:
-        from app.cart import build_cart, mock_checkout
-        fake_package = {
-            "id": "pkg_demo_123",
-            "total_price": 65000,
-            "outbound": {"carrier": "SU-1234", "origin": "Москва", "destination": "Сочи", "depart": "2027-06-10T10:00",
-                         "arrive": "2027-06-10T12:00", "price": 15000},
-            "return": None,
-            "hotel": {"name": data.get("hotel_name", "Тестовый отель"), "nights": 7, "total_price": 35000},
-            "transfer": None
-        }
-        fake_query = {"guests": 2}
 
-        cart = build_cart(fake_package, fake_query)
-        traveler = {
-            "contact_name": full_name,
-            "contact_phone": phone,
-            "guest_names": ["Гость 1", "Гость 2"]
-        }
+    from app.cart import build_cart, mock_checkout
+    data = await state.get_data()
+    user = await get_user_profile(message.from_user.id)
 
-        result = mock_checkout(cart, traveler)
-        if result["status"] == "confirmed":
-            booking_id = result["booking_id"]
-            total = result["total"]
-            storage.save_route(
-                slots={"name": full_name, "phone": phone},
-                hotels=[],
-                chosen={"hotel": data.get("hotel_name"), "status": "booked"},
-                note="Оплачено (демо)",
-                user_id=str(message.from_user.id),
-                package={"booking_id": booking_id},
-                route_id=booking_id
+    package = data.get("selected_package")
+    query = data.get("selected_query")
+
+    if user is None or package is None or query is None:
+        await message.answer("Сначала выберите вариант поездки.")
+        return
+
+    cart = build_cart(package, query)
+
+    traveler = {
+        "contact_name": full_name,
+        "contact_phone": phone,
+        "guest_names": [
+            f"Гость {i + 1}"
+            for i in range(query["guests"])
+        ]
+    }
+
+    result = mock_checkout(cart, traveler)
+    if result["status"] == "confirmed":
+        # booking_id = result["booking_id"]
+        total = result["total"]
+        try:
+            booking_id = await create_demo_booking(
+                user_id=user["id"],
+                query=query,
+                package=package,
             )
+        except Exception:
+            logging.exception("Не удалось сохранить демо-бронь")
             await message.answer(
-                f"✅ <b>Бронирование подтверждено!</b>\n\n"
-                f"Номер вашей брони: <code>{html.quote(booking_id)}</code>\n"
-                f"Итого: {html.quote(str(total))} ₽\n"
-                f"Гость: {html.quote(full_name)}\n\n"
-                f"Ваучер отправлен на почту (демо). Спасибо, что выбрали нас!",
-                reply_markup=ReplyKeyboardRemove(),
-                parse_mode="HTML"
+                "Не удалось сохранить бронь. Подтверждение не выдано."
             )
-        else:
-            await message.answer(f"Ошибка при оплате: не хватает данных ({result.get('missing')})")
+            return
 
-    except Exception as e:
-        logging.error(f"Ошибка при имитации оплаты: {e}")
-        booking_id = "MOCK-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        await state.clear()
+        await state.set_state(Flow.chatting)
+
         await message.answer(
-            f"✅ <b>Бронь оформлена (упрощенная демо)!</b>\n\n"
-            f"Номер: <code>{html.quote(booking_id)}</code>\n"
-            f"Гость: {html.quote(full_name)}",
+            f"✅ <b>Бронирование подтверждено!</b>\n\n"
+            f"Номер вашей брони: <code>{html.quote(str(booking_id))}</code>\n"
+            f"Итого: {html.quote(str(package['total_price']))} ₽\n"
+            f"Гость: {html.quote(full_name)}\n\n"
+            f"Ваучер отправлен на почту (демо). Спасибо, что выбрали нас!",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="HTML"
         )
-    await state.clear()
+    else:
+        await message.answer(f"Ошибка при оплате: не хватает данных ({result.get('missing')})")
+
+    # except Exception as e:
+    #     logging.error(f"Ошибка при имитации оплаты: {e}")
+    #     booking_id = "MOCK-" + ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    #     await message.answer(
+    #         f"✅ <b>Бронь оформлена (упрощенная демо)!</b>\n\n"
+    #         f"Номер: <code>{html.quote(booking_id)}</code>\n"
+    #         f"Гость: {html.quote(full_name)}",
+    #         reply_markup=ReplyKeyboardRemove(),
+    #         parse_mode="HTML"
+    #     )
+    # await state.clear()
 
 
 @router.message(Flow.waiting_payment, F.text == "Отмена")
@@ -434,7 +541,7 @@ async def handle_chat(message: Message, state: FSMContext):
     text = message.text.strip()
 
     if user_id not in user_agents:
-        user_agents[user_id] = TravelAgent(user_id=str(user_id))
+        user_agents[user_id] = await create_agent(user_id)
 
     agent = user_agents[user_id]
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")

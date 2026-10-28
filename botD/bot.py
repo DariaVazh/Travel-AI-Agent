@@ -23,7 +23,6 @@ from database.user_repository import (
     get_user_profile,
     save_user_phone, get_user_memory
 )
-from app.weather import get_weather, weather_text
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -92,6 +91,14 @@ async def require_registration(message: Message, state: FSMContext) -> dict | No
     return user
 
 
+def clean_markdown(text: str) -> str:
+    text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
+    text = re.sub(r'^###\s*(.*)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+    text = re.sub(r'^---$', '', text, flags=re.MULTILINE)
+    text = text.replace('*', '')
+    return text
+
+
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
 
@@ -148,7 +155,6 @@ async def find_trip(message: Message, state: FSMContext):
 
 @router.message(Flow.waiting_contact, F.contact)
 async def on_contact(message: Message, state: FSMContext):
-    # Кнопка request_contact передаёт именно свой контакт. Чужие не принимаем.
     telegram_id = message.from_user.id
     if message.contact.user_id != telegram_id:
         await message.answer(
@@ -163,7 +169,6 @@ async def on_contact(message: Message, state: FSMContext):
     )
     await save_user_phone(telegram_id, message.contact.phone_number)
 
-    # Если контакт обновили во время беседы, НЕ удаляем историю и память агента.
     if telegram_id not in user_agents:
         user_agents[telegram_id] = await create_agent(telegram_id)
 
@@ -213,7 +218,7 @@ async def process_pick(callback: CallbackQuery, state: FSMContext):
     response = await agent.handle_async(text)
     answer_text = response.get("text", "")
 
-    answer_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', answer_text)
+    answer_text = clean_markdown(answer_text)
 
     await callback.message.answer(answer_text, parse_mode="HTML")
     await state.set_state(Flow.waiting_payment)
@@ -496,25 +501,9 @@ async def handle_chat(message: Message, state: FSMContext):
 
         await thinking_msg.delete()
 
-        answer_text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', answer_text)
+        answer_text = clean_markdown(answer_text)
 
         await message.answer(answer_text, parse_mode="HTML")
-
-        found_city = agent.slots.destination
-        if found_city:
-            try:
-                from datetime import date, timedelta
-                tomorrow = (date.today() + timedelta(days=1)).isoformat()
-
-                date_from = agent.slots.dates.date_from or tomorrow
-                date_to = agent.slots.dates.date_to or date_from
-
-                weather = get_weather(found_city, date_from, date_to)
-                if weather:
-                    w_text = weather_text(found_city, weather)
-                    await message.answer(w_text)
-            except Exception as e:
-                logging.error(f"Ошибка при получении погоды для {found_city}: {e}")
 
         if buttons:
             inline_kb = []

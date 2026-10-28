@@ -1,9 +1,6 @@
 import os
 import asyncio
 import logging
-import random
-import string
-import re
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import CommandStart
@@ -16,10 +13,11 @@ from aiogram.types import (
 )
 from agent.agent import TravelAgent
 from agent import storage
+from bot.memory_service import checkpoint_memory
 from database.user_repository import (
     get_or_create_user,
     get_user_profile,
-    save_user_phone
+    save_user_phone, get_user_memory
 )
 
 load_dotenv()
@@ -52,6 +50,13 @@ def get_chat_keyboard():
         resize_keyboard=True, one_time_keyboard=False
     )
 
+async def create_agent(telegram_id: int) -> TravelAgent:
+
+    agent = TravelAgent(user_id=str(telegram_id))
+    agent.long_term_memory = await get_user_memory(telegram_id)
+
+    return agent
+
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
 
@@ -74,7 +79,7 @@ async def start(message: Message, state: FSMContext):
         )
         await state.set_state(Flow.chatting)
         if tg_user.id not in user_agents:
-            user_agents[tg_user.id] = TravelAgent(user_id=str(tg_user.id))
+            user_agents[tg_user.id] = await create_agent(tg_user.id)
     else:
         # Если новый — просим контакт
         await message.answer(
@@ -125,7 +130,7 @@ async def on_contact(message: Message, state: FSMContext):
         phone_number=contact.phone_number
     )
 
-    user_agents[telegram_id] = TravelAgent(user_id=str(telegram_id))
+    user_agents[telegram_id] = await create_agent(telegram_id)
 
     await message.answer(
         f"Спасибо, {message.from_user.full_name}!\n"
@@ -161,11 +166,12 @@ async def show_bookings(message: Message):
 # ДИАЛОГ
 @router.message(Flow.chatting, F.text)
 async def handle_chat(message: Message, state: FSMContext):
+
     user_id = message.from_user.id
     text = message.text.strip()
     
     if user_id not in user_agents:
-        user_agents[user_id] = TravelAgent(user_id=str(user_id))
+        user_agents[user_id] = await create_agent(user_id)
         
     agent = user_agents[user_id]
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
@@ -173,7 +179,7 @@ async def handle_chat(message: Message, state: FSMContext):
     try:
         # асинхронный метод Даши
         response = await agent.handle_async(text)
-        
+
         answer_text = response.get("text", "")
         buttons = response.get("buttons", [])
         
@@ -193,6 +199,7 @@ async def handle_chat(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"ОШИБКА: {e}")
         await message.answer(f"Ошибка: {e}")
+
 
 # ОБРАБОТЧИК КНОПОК ВЫБОРА
 @router.callback_query(F.data.startswith("pick:"))
@@ -238,12 +245,44 @@ async def process_more(message: Message, state: FSMContext):
                          reply_markup=ReplyKeyboardRemove())
     await state.set_state(Flow.chatting)
 
+# @router.message(F.text == "Начать сначала")
+# async def process_restart(message: Message, state: FSMContext):
+#     user_agents[message.from_user.id] = TravelAgent(user_id=str(message.from_user.id))
+#     await message.answer("Давайте начнем сначала! Куда хотите поехать?",
+#                          reply_markup=ReplyKeyboardRemove())
+#     await state.set_state(Flow.chatting)
+
 @router.message(F.text == "Начать сначала")
-async def process_restart(message: Message, state: FSMContext):
-    user_agents[message.from_user.id] = TravelAgent(user_id=str(message.from_user.id))
-    await message.answer("Давайте начнем сначала! Куда хотите поехать?", 
-                         reply_markup=ReplyKeyboardRemove())
+async def process_restart(
+    message: Message,
+    state: FSMContext
+):
+    telegram_id = message.from_user.id
+
+    old_agent = user_agents.get(telegram_id)
+
+    if old_agent is not None:
+        # Сначала сохраняем долгосрочную память
+        await checkpoint_memory(
+            old_agent,
+            telegram_id
+        )
+
+    # Загружаем актуальные предпочтения
+    memory = await get_user_memory(telegram_id)
+
+    # Создаём новую сессию
+    agent = TravelAgent(user_id=str(telegram_id))
+    agent.long_term_memory = memory
+
+    user_agents[telegram_id] = agent
+
+    await message.answer(
+        "Давайте начнем сначала! Куда хотите поехать?"
+    )
+
     await state.set_state(Flow.chatting)
+
 
 async def main():
     bot = Bot(token=os.getenv("BOT_TOKEN"))

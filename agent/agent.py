@@ -23,6 +23,9 @@ class TravelAgent:
         self.active_cart = None
         self.booking_state = None  # None | "awaiting_checkout_info"
 
+        self.long_term_memory = {"schema_version": 1}
+        self.memory_saved_upto = 0
+
     def feed_external_routes(self, data: dict):
         """Принимает JSON с готовыми маршрутами от внешней программы."""
         self.raw_res = data
@@ -112,7 +115,14 @@ class TravelAgent:
         api_out = to_api(self.raw_res)
 
         # Очеловечивание через LLM
-        human_text = reply_to_user(user_text, {"api_data": api_out, "history": self.chat_history[-5:]})
+        human_text = reply_to_user(
+            user_text,
+            {
+                "api_data": api_out,
+                "history": self.chat_history[-5:],
+                "memory": self.long_term_memory
+            }
+        )
         self.chat_history.append({"role": "assistant", "content": human_text})
 
         return {

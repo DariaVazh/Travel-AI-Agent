@@ -19,9 +19,13 @@ DATABASE_URL = URL.create(
     database=os.environ["DB_NAME"]
 )
 
+use_ssl = os.getenv("DB_SSL", "true").lower() == "true"
+
 engine = create_async_engine(
     DATABASE_URL,
-    connect_args={"ssl": ssl.create_default_context()},
+    connect_args={
+        "ssl": ssl.create_default_context() if use_ssl else False
+    },
     pool_pre_ping=True
 )
 

@@ -9,6 +9,16 @@ services:
 
     env_file:
       - .env
+
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_SSL: "false"
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
     healthcheck:
       test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)" ]
       interval: 10s
@@ -45,6 +55,36 @@ services:
 
     volumes:
       - postgres_data:/var/lib/postgresql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ostrovok -d free_penguins_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+
+    env_file:
+      - .env
+
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_SSL: "false"
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    restart: "no"
+
 
 volumes:
   postgres_data:

@@ -163,7 +163,12 @@ class TravelAgent:
             }
 
         # --- Извлечение слотов, адаптер, поиск через plan_trip ---
-        raw_slots = extract_slots(user_text, self.slots.model_dump())
+        # raw_slots = extract_slots(user_text, self.slots.model_dump())
+        raw_slots = extract_slots(
+            user_text,
+            previous_slots=self.slots.model_dump(),
+            memory=self.long_term_memory,
+        )
         print("\n=== DEBUG extract_slots ===")
         print("raw_slots:", raw_slots)
         print("===========================\n")
@@ -251,9 +256,9 @@ class TravelAgent:
             user_text,
             {
                 "api_data": api_out,
-                "history": self.chat_history[-5:]
-                # "memory": self.long_term_memory
-            }
+                "history": self.chat_history[-5:],
+                "memory": self.long_term_memory,
+            },
         )
         self.chat_history.append({"role": "assistant", "content": human_text})
 

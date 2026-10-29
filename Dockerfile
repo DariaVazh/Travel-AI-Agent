@@ -24,6 +24,8 @@ COPY app/ ./app/
 COPY agent/ ./agent/
 COPY botD/ ./botD/
 COPY database/ ./database/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./alembic.ini
 
 RUN useradd --create-home --uid 10001 appuser
 USER appuser

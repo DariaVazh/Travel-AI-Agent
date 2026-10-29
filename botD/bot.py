@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 router = Router()
 user_agents = {}
 _memory_locks: dict[int, asyncio.Lock] = {}
-MEMORY_IDLE_SECONDS = 3 * 60
+MEMORY_IDLE_SECONDS = 6 * 60
 MEMORY_RETRY_SECONDS = 60
 
 _last_activity: dict[int, float] = {}
